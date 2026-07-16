@@ -98,22 +98,34 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 /* ── Badge ── */
+// Weekly Opus is a separate ceiling that can block before the 5h session does, so the
+// badge tracks whichever is closer to 100. Prefix says which: S = session, O = Opus.
+// opusWeeklyPercent is undefined on plans without a separate Opus limit.
+function bindingLimit(u) {
+  const opus = u.opusWeeklyPercent;
+  return opus !== undefined && opus > u.percent
+    ? { key: 'O', pct: opus }
+    : { key: 'S', pct: u.percent };
+}
+
 function buildTitle(u) {
   if (!u || u.percent === undefined) return 'Claude Quota Monitor';
   const strip = (s) => s.replace(/\s*\(.*?\)/g, '').trim();
   const s = strip(chrome.i18n.getMessage('session_label') || 'Session');
   const w = strip(chrome.i18n.getMessage('weekly_label')  || 'Weekly');
+  const o = strip(chrome.i18n.getMessage('weekly_opus')   || 'Only Opus');
   const d =       chrome.i18n.getMessage('weekly_design') || 'Claude Design';
   let title = `${s}: ${u.percent}%`;
   if (u.weeklyPercent       !== undefined) title += ` · ${w}: ${u.weeklyPercent}%`;
+  if (u.opusWeeklyPercent   !== undefined) title += ` · ${o}: ${u.opusWeeklyPercent}%`;
   if (u.designWeeklyPercent !== undefined) title += ` · ${d}: ${u.designWeeklyPercent}%`;
   return title;
 }
 
 function updateBadge(u) {
-  if (!u?.percent === undefined) return;
-  const pct = u.percent;
-  chrome.action.setBadgeText({ text: `${pct}%` });
+  if (u?.percent === undefined) return;
+  const { key, pct } = bindingLimit(u);
+  chrome.action.setBadgeText({ text: `${key}${Math.round(pct)}` });
   chrome.action.setBadgeBackgroundColor({
     color: pct >= 90 ? '#e53e3e' : pct >= 70 ? '#dd6b20' : '#2f855a'
   });
