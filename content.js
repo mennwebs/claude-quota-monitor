@@ -9,25 +9,34 @@
  * sem precisar de aba aberta.
  */
 
-const POLL_MS = 3 * 60 * 1000;
+const POLL_MS = 15 * 60 * 1000;
+
+// orgId and plan don't change while the page is open, but were re-fetched every cycle —
+// tripling the request count for two constants. Cache them; a reload re-reads both.
+let cachedOrgId = null;
+let cachedPlan = null;
 
 async function getOrgId() {
+  if (cachedOrgId) return cachedOrgId;
   try {
     const res = await fetch('/api/organizations', { credentials: 'include' });
     if (!res.ok) return null;
     const orgs = await res.json();
-    return Array.isArray(orgs) && orgs[0]?.uuid ? orgs[0].uuid : null;
+    cachedOrgId = Array.isArray(orgs) && orgs[0]?.uuid ? orgs[0].uuid : null;
+    return cachedOrgId;
   } catch { return null; }
 }
 
 async function getPlan(orgId) {
+  if (cachedPlan) return cachedPlan;
   try {
     const res = await fetch(`/api/organizations/${orgId}`, { credentials: 'include' });
     if (!res.ok) return null;
     const d = await res.json();
     // rate_limit_tier ex: "default_claude_max_5x", "default_pro", "default_free"
     // capabilities ex: ["claude_max", "chat"]
-    return d?.rate_limit_tier ?? d?.capabilities?.[0] ?? d?.plan_nickname ?? d?.plan ?? d?.tier ?? null;
+    cachedPlan = d?.rate_limit_tier ?? d?.capabilities?.[0] ?? d?.plan_nickname ?? d?.plan ?? d?.tier ?? null;
+    return cachedPlan;
   } catch { return null; }
 }
 

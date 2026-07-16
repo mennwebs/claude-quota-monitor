@@ -7,7 +7,7 @@
  */
 
 const ALARM = 'quota-poll';
-const POLL_MINUTES = 10;
+const POLL_MINUTES = 15;
 
 /* ── Fetch direto do background (funciona com os cookies do usuário) ── */
 async function fetchPlan(orgId) {
@@ -46,8 +46,9 @@ async function fetchUsage() {
     const opus   = data.seven_day_opus     ?? null;
     const extra  = data.extra_usage        ?? null;
 
-    // Re-busca o plano para refletir upgrades/downgrades sem precisar abrir claude.ai
-    const plan = await fetchPlan(orgId);
+    // Plan only changes on an upgrade/downgrade, so fetch it once and reuse it — this is
+    // half the request volume. Clear claudeUsage.plan from storage to force a re-read.
+    const plan = claudeUsage?.plan ?? await fetchPlan(orgId);
 
     chrome.storage.local.set({
       claudeUsage: {
