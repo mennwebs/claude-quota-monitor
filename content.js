@@ -16,8 +16,36 @@ async function getOrgId() {
     const res = await fetch('/api/organizations', { credentials: 'include' });
     if (!res.ok) return null;
     const orgs = await res.json();
-    return Array.isArray(orgs) && orgs[0]?.uuid ? orgs[0].uuid : null;
+    if (!Array.isArray(orgs)) return null;
+    // Prefere a org com capability "chat" (claude.ai). Contas com org de API
+    // separada podem ter mais de uma; orgs[0] nem sempre é a de chat.
+    const org = orgs.find(o => o.capabilities?.includes('chat')) || orgs[0];
+    return org?.uuid ?? null;
   } catch { return null; }
+}
+
+/* Extrai as categorias semanais por modelo do array `limits` (novo formato da
+ * API). Cada `weekly_scoped` traz scope.model.display_name (ex: "Fable",
+ * "Sonnet", "Opus"). Fallback para os campos legados seven_day_* caso a API
+ * ainda não retorne `limits`. */
+function extractWeeklyScoped(data) {
+  if (Array.isArray(data.limits) && data.limits.length) {
+    return data.limits
+      .filter(l => l.kind === 'weekly_scoped' && l.scope?.model?.display_name)
+      .map(l => ({
+        name:    l.scope.model.display_name,
+        percent: l.percent ?? 0,
+        resetAt: l.resets_at ?? null
+      }));
+  }
+  // Fallback legado
+  return [
+    ['Sonnet', data.seven_day_sonnet],
+    ['Opus',   data.seven_day_opus],
+    ['Design', data.seven_day_omelette],
+  ].filter(([, v]) => v).map(([name, v]) => ({
+    name, percent: v.utilization ?? 0, resetAt: v.resets_at ?? null
+  }));
 }
 
 async function getPlan(orgId) {
@@ -43,13 +71,9 @@ async function fetchAndStore() {
     const session = data.five_hour;
     if (!session) return;
 
-    const plan = await getPlan(orgId);
-
-    // Claude Design weekly quota (internal API field: seven_day_omelette)
-    const design = data.seven_day_omelette ?? null;
-    const sonnet = data.seven_day_sonnet   ?? null;
-    const opus   = data.seven_day_opus     ?? null;
-    const extra  = data.extra_usage        ?? null;
+    const plan  = await getPlan(orgId);
+    const extra = data.extra_usage ?? null;
+    const weeklyScoped = extractWeeklyScoped(data);
 
     chrome.storage.local.set({
       claudeUsage: {
@@ -57,12 +81,7 @@ async function fetchAndStore() {
         resetAt:              session.resets_at,
         weeklyPercent:        data.seven_day?.utilization,
         weeklyResetAt:        data.seven_day?.resets_at,
-        sonnetWeeklyPercent:  sonnet?.utilization,
-        sonnetWeeklyResetAt:  sonnet?.resets_at,
-        opusWeeklyPercent:    opus?.utilization,
-        opusWeeklyResetAt:    opus?.resets_at,
-        designWeeklyPercent:  design?.utilization,
-        designWeeklyResetAt:  design?.resets_at,
+        weeklyScoped,
         extraUsageEnabled:    extra?.is_enabled  ?? false,
         extraUsageUsed:       extra?.used_credits ?? 0,
         extraUsageLimit:      extra?.monthly_limit ?? 0,

@@ -24,6 +24,27 @@ async function fetchPlan(orgId) {
   } catch { return null; }
 }
 
+/* Extrai categorias semanais por modelo do array `limits`, com fallback para
+ * os campos legados seven_day_*. Mesma lógica do content.js. */
+function extractWeeklyScoped(data) {
+  if (Array.isArray(data.limits) && data.limits.length) {
+    return data.limits
+      .filter(l => l.kind === 'weekly_scoped' && l.scope?.model?.display_name)
+      .map(l => ({
+        name:    l.scope.model.display_name,
+        percent: l.percent ?? 0,
+        resetAt: l.resets_at ?? null
+      }));
+  }
+  return [
+    ['Sonnet', data.seven_day_sonnet],
+    ['Opus',   data.seven_day_opus],
+    ['Design', data.seven_day_omelette],
+  ].filter(([, v]) => v).map(([name, v]) => ({
+    name, percent: v.utilization ?? 0, resetAt: v.resets_at ?? null
+  }));
+}
+
 async function fetchUsage() {
   const { claudeUsage } = await chrome.storage.local.get('claudeUsage');
   const orgId = claudeUsage?.orgId;
@@ -40,11 +61,8 @@ async function fetchUsage() {
     const session = data.five_hour;
     if (!session) return;
 
-    // Claude Design weekly quota (internal API field: seven_day_omelette)
-    const design = data.seven_day_omelette ?? null;
-    const sonnet = data.seven_day_sonnet   ?? null;
-    const opus   = data.seven_day_opus     ?? null;
-    const extra  = data.extra_usage        ?? null;
+    const extra = data.extra_usage ?? null;
+    const weeklyScoped = extractWeeklyScoped(data);
 
     // Re-busca o plano para refletir upgrades/downgrades sem precisar abrir claude.ai
     const plan = await fetchPlan(orgId);
@@ -56,12 +74,7 @@ async function fetchUsage() {
         resetAt:              session.resets_at,
         weeklyPercent:        data.seven_day?.utilization,
         weeklyResetAt:        data.seven_day?.resets_at,
-        sonnetWeeklyPercent:  sonnet?.utilization,
-        sonnetWeeklyResetAt:  sonnet?.resets_at,
-        opusWeeklyPercent:    opus?.utilization,
-        opusWeeklyResetAt:    opus?.resets_at,
-        designWeeklyPercent:  design?.utilization,
-        designWeeklyResetAt:  design?.resets_at,
+        weeklyScoped,
         extraUsageEnabled:    extra?.is_enabled  ?? false,
         extraUsageUsed:       extra?.used_credits ?? 0,
         extraUsageLimit:      extra?.monthly_limit ?? 0,
@@ -102,10 +115,12 @@ function buildTitle(u) {
   const strip = (s) => s.replace(/\s*\(.*?\)/g, '').trim();
   const s = strip(chrome.i18n.getMessage('session_label') || 'Session');
   const w = strip(chrome.i18n.getMessage('weekly_label')  || 'Weekly');
-  const d =       chrome.i18n.getMessage('weekly_design') || 'Claude Design';
   let title = `${s}: ${u.percent}%`;
-  if (u.weeklyPercent       !== undefined) title += ` · ${w}: ${u.weeklyPercent}%`;
-  if (u.designWeeklyPercent !== undefined) title += ` · ${d}: ${u.designWeeklyPercent}%`;
+  if (u.weeklyPercent !== undefined) title += ` · ${w}: ${u.weeklyPercent}%`;
+  // Categorias por modelo (Fable, Sonnet, Opus, etc.)
+  (u.weeklyScoped || []).forEach(cat => {
+    if (cat?.name != null) title += ` · ${cat.name}: ${cat.percent ?? 0}%`;
+  });
   return title;
 }
 

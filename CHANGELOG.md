@@ -4,6 +4,23 @@ All notable changes to Claude Quota Monitor are documented here.
 
 ---
 
+## [1.7.2] — 2026-07-23
+
+### Added
+- **Fable weekly quota** — the new Fable model now appears as a weekly category
+- **Dynamic per-model categories** — weekly model breakdowns are now rendered dynamically from the API's new `limits` array, so any current or future model (Fable, Sonnet, Opus, Design, ...) shows up automatically with the name and reset time the API provides
+
+### Fixed
+- **Per-model bars broken by API change** — the API moved per-model quota from individual `seven_day_*` fields (now returning null) to a structured `limits` array with `weekly_scoped` entries; the extension now reads the new format, with a fallback to the legacy fields
+- **Wrong organization selected on multi-org accounts** — accounts with a separate API organization could have the extension pick the wrong org (`orgs[0]`); it now prefers the organization with the `chat` capability
+- **BOM in locale files** — messages.json files written during 1.7/1.7.1 packaging contained a UTF-8 BOM; removed for clean JSON parsing
+
+### Changed
+- `setBar()` simplified to preserve any `bar--*` color modifier generically instead of a hardcoded list
+- Removed now-unused locale keys `weekly_sonnet`, `weekly_opus`, `weekly_design` (per-model labels come from the API's `display_name`)
+
+---
+
 ## [1.7.1] — 2026-06-03
 
 ### Added

@@ -1,4 +1,4 @@
-﻿{
+{
   "ext_name": {
     "message": "Claude Quota Monitor"
   },
@@ -95,9 +95,6 @@
   "weekly_all_models": {
     "message": "Semua model"
   },
-  "weekly_design": {
-    "message": "Claude Design"
-  },
   "time_days": {
     "message": "h"
   },
@@ -134,16 +131,10 @@
   "review_star_title": {
     "message": "Beri nilai di Chrome Web Store"
   },
-  "weekly_sonnet": {
-    "message": "Hanya Sonnet"
-  },
   "extra_usage_label": {
     "message": "Kredit penggunaan"
   },
   "extra_usage_limit": {
     "message": "batas"
-  },
-  "weekly_opus": {
-    "message": "Hanya Opus"
   }
 }
