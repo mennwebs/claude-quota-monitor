@@ -4,6 +4,13 @@ All notable changes to Claude Quota Monitor are documented here.
 
 ---
 
+## [1.7.3] — 2026-07-31
+
+### Fixed
+- **Removed unnecessary `tabs` permission** — the Chrome Web Store flagged the `tabs` permission as excessive (policy "Purple Potassium"). The extension only uses `chrome.tabs.create({ url })`, which does not require the `tabs` permission (that permission is only needed to read sensitive tab properties like url/title of existing tabs). Removing it resolves the compliance warning with no loss of functionality.
+
+---
+
 ## [1.7.2] — 2026-07-23
 
 ### Added

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_ext_name__",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "description": "__MSG_ext_description__",
   "default_locale": "pt_BR",
   "icons": {
@@ -9,7 +9,7 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["storage", "tabs", "alarms"],
+  "permissions": ["storage", "alarms"],
   "host_permissions": ["https://claude.ai/*"],
   "background": {
     "service_worker": "background.js"
