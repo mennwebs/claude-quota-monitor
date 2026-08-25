@@ -35,9 +35,13 @@ The extension reads quota data from the `claude.ai/api/organizations/*/usage` en
 ## macOS menu bar bridge
 
 If you run several Claude accounts in several Chrome profiles, this fork can push each
-profile's reading to [claude-quota-mac](https://github.com/mennwebs/claude-quota-mac) — a menu
-bar app that shows one bar per account, with reset times, and greys out readings that have gone
-stale.
+profile's reading to the macOS menu bar app in [`mac/`](mac/) — one bar per account, with reset
+times, and readings greyed out once they go stale.
+
+The app lives in this repo because the two halves share a wire contract
+([`docs/protocol.md`](docs/protocol.md)); changing it on one side without the other is the
+mistake worth making impossible. The extension stays at the repo root so merges from upstream
+keep applying cleanly.
 
 Right-click the toolbar icon → **Options**, tick *Send readings to the Mac app*, paste the
 token from the app, and press **Save & connect**. Repeat in every profile.
@@ -80,7 +84,8 @@ The test suite covers popup rendering, bar colors, i18n strings, time formatting
 bridge's payload builder. The bridge suite needs no browser:
 
 ```bash
-node -e "require('./tests/runner').run([require('./tests/test-bridge')])"
+npm run test:bridge   # bridge only, no browser needed
+npm run test:mac      # the Swift app's own checks
 ```
 
 ## Project structure
@@ -96,7 +101,9 @@ claude-quota-monitor/
 ├── onboarding.html/css/js # First-install welcome page
 ├── icons/                 # Extension icons (16, 48, 128px)
 ├── _locales/              # i18n strings (10 languages)
-└── tests/                 # Automated test suite
+├── tests/                 # Automated test suite
+├── docs/protocol.md       # Wire contract between the extension and the Mac app
+└── mac/                   # macOS menu bar app (Swift, no dependencies)
 ```
 
 ## Changelog

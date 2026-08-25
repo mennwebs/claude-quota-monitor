@@ -15,9 +15,9 @@ just read the session quota.
 
 Two sources, merged per account, newest observation wins per limit.
 
-**1. The browser.** A [forked Claude Quota Monitor](https://github.com/mennwebs/claude-quota-monitor)
-extension posts what it already reads from `claude.ai` to `127.0.0.1`. One Chrome profile per
-account; each profile reports the account it is signed in as.
+**1. The browser.** The Claude Quota Monitor fork in the parent directory posts what it already
+reads from `claude.ai` to `127.0.0.1`. One Chrome profile per account; each profile reports the
+account it is signed in as.
 
 **2. Claude Code on this machine.** Claude Code hands its status line command a JSON blob on
 every render, and that blob contains the live `rate_limits`. A shim copies it to a file. No API
@@ -68,12 +68,13 @@ pretending otherwise would be the one lie that makes the whole panel untrustwort
 ## Install
 
 ```bash
-git clone https://github.com/mennwebs/claude-quota-mac
-cd claude-quota-mac
+cd mac
 ./scripts/build.sh
 cp -R "dist/Claude Quota.app" /Applications/
 open "/Applications/Claude Quota.app"
 ```
+
+From the repo root, `npm run build:mac` does the same thing.
 
 Needs macOS 14+ and a Swift toolchain (Xcode or the command line tools). No dependencies.
 
@@ -134,6 +135,11 @@ Options to match.
 
 **Two rows for one account** — they merge as soon as a report arrives carrying both identifiers.
 If they persist, delete one in ตั้งค่า → บัญชี; it comes back correctly on the next report.
+
+## Where things are
+
+This is one half of a two-part tool. The Chrome extension is at the repo root; the wire contract
+between them is in [`../docs/protocol.md`](../docs/protocol.md).
 
 ## Licence
 
