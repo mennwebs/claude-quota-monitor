@@ -145,5 +145,71 @@
   },
   "weekly_opus": {
     "message": "Only Opus"
+  },
+  "bridge_title": {
+    "message": "Mac menu bar bridge"
+  },
+  "bridge_intro": {
+    "message": "Send this profile's quota to the Claude Quota menu bar app on this Mac. Nothing leaves the machine — the app listens on 127.0.0.1 only."
+  },
+  "bridge_enable": {
+    "message": "Send readings to the Mac app"
+  },
+  "bridge_port": {
+    "message": "Port"
+  },
+  "bridge_token": {
+    "message": "Token"
+  },
+  "bridge_profile": {
+    "message": "Profile name"
+  },
+  "bridge_reveal": {
+    "message": "show"
+  },
+  "bridge_hide": {
+    "message": "hide"
+  },
+  "bridge_save": {
+    "message": "Save & connect"
+  },
+  "bridge_test": {
+    "message": "Test"
+  },
+  "bridge_hint": {
+    "message": "Repeat this in every Chrome profile you want to see in the menu bar. Each profile reports the account it is signed in as."
+  },
+  "bridge_off": {
+    "message": "Off — this profile is not reporting."
+  },
+  "bridge_need_token": {
+    "message": "Paste the token from the Mac app."
+  },
+  "bridge_need_perm": {
+    "message": "Permission for 127.0.0.1 not granted — press Save & connect."
+  },
+  "bridge_no_app": {
+    "message": "No app answering on port "
+  },
+  "bridge_ok": {
+    "message": "Connected. Last sent "
+  },
+  "bridge_bad_token": {
+    "message": "App rejected the token."
+  },
+  "bridge_no_data": {
+    "message": "App reachable, but this profile has no reading yet — open claude.ai."
+  },
+  "bridge_reachable": {
+    "message": "App reachable. Waiting for the next reading."
+  },
+  "bridge_bad_port": {
+    "message": "Port must be between 1024 and 65535."
+  },
+  "bridge_perm_denied": {
+    "message": "Permission denied — the bridge cannot send anything."
+  },
+  "bridge_testing": {
+    "message": "Testing…"
   }
 }

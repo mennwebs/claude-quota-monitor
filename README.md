@@ -28,9 +28,26 @@ The extension reads quota data from the `claude.ai/api/organizations/*/usage` en
 | Permission | Purpose |
 |---|---|
 | `storage` | Persist quota data between sessions |
-| `tabs` | Open claude.ai when clicking "View quota" |
-| `alarms` | Schedule background refresh every 10 minutes |
+| `alarms` | Schedule background refresh |
 | `host_permissions: claude.ai` | Read quota data from the Claude API |
+| `optional_host_permissions: 127.0.0.1` | Only if you turn on the macOS menu bar bridge. Requested at that point, never on install |
+
+## macOS menu bar bridge
+
+If you run several Claude accounts in several Chrome profiles, this fork can push each
+profile's reading to [claude-quota-mac](https://github.com/mennwebs/claude-quota-mac) — a menu
+bar app that shows one bar per account, with reset times, and greys out readings that have gone
+stale.
+
+Right-click the toolbar icon → **Options**, tick *Send readings to the Mac app*, paste the
+token from the app, and press **Save & connect**. Repeat in every profile.
+
+It talks to `127.0.0.1` and nothing else. That host permission is **optional** — a plain install
+does not hold it, and Chrome only asks when you press Save & connect. With the bridge off,
+`bridge.js` makes no requests at all.
+
+Re-posting the cached reading is free on claude.ai's side, so the bridge pushes every minute
+while the quota fetch stays on its slow poll. Request volume to claude.ai is unchanged.
 
 ## Development
 
@@ -59,7 +76,12 @@ npm install
 npm test
 ```
 
-The test suite (25 tests) covers popup rendering, bar colors, i18n strings, and time formatting.
+The test suite covers popup rendering, bar colors, i18n strings, time formatting, and the
+bridge's payload builder. The bridge suite needs no browser:
+
+```bash
+node -e "require('./tests/runner').run([require('./tests/test-bridge')])"
+```
 
 ## Project structure
 
@@ -67,6 +89,8 @@ The test suite (25 tests) covers popup rendering, bar colors, i18n strings, and 
 claude-quota-monitor/
 ├── manifest.json          # Extension manifest (MV3)
 ├── background.js          # Service worker — refresh scheduler, badge updates
+├── bridge.js              # macOS menu bar bridge — loopback push (opt-in)
+├── options.html/css/js    # Bridge settings
 ├── content.js             # Injected into claude.ai — captures quota from API
 ├── popup.html/css/js      # Extension popup UI
 ├── onboarding.html/css/js # First-install welcome page

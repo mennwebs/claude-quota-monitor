@@ -4,6 +4,26 @@ All notable changes to Claude Quota Monitor are documented here.
 
 ---
 
+## [Unreleased] — macOS menu bar bridge
+
+### Added
+- `bridge.js` — pushes the reading this extension already has to a menu bar app listening on
+  `127.0.0.1`. Opt-in: with no token configured it makes no requests.
+- Options page for the bridge (port, token, profile name), reachable from the toolbar icon's
+  right-click menu.
+- A one-minute push alarm. It re-sends the cached value and never touches claude.ai, so the Mac
+  app is current within a minute of launching while request volume to claude.ai is unchanged.
+- The app can ask for a real refresh in its reply to a push — the only path from the Mac back
+  into the browser.
+- `tests/test-bridge.js` — 23 checks over the payload builder, loaded from `bridge.js` itself
+  rather than copied, so it cannot drift from what ships.
+
+### Changed
+- `optional_host_permissions: http://127.0.0.1/*`. Optional on purpose: a plain install carries
+  no new permission, and Chrome only asks when the bridge is switched on.
+- README's permission table no longer lists `tabs`, which was dropped in 5edcd50.
+
+
 ## [1.7.1] — 2026-06-03
 
 ### Added

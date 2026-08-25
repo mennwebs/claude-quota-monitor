@@ -8,4 +8,5 @@ const { run } = require('./runner');
 run([
   require('./test-fmt'),
   require('./test-popup'),
+  require('./test-bridge'),
 ]);

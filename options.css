@@ -1,0 +1,50 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0f0f0f; --surface: #1a1a1a; --text: #e8e8e8; --muted: #8a8a8a;
+  --border: #2a2a2a; --accent: #a78bfa; --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f4f8; --surface: #ffffff; --text: #1e1e30; --muted: #6b6b85;
+    --border: #dedee8; --accent: #7c5cf0; --ok: #16a34a; --warn: #b45309; --err: #dc2626;
+  }
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.5;
+}
+.wrap { width: 420px; padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 12px; }
+
+h1 { font-size: 14px; font-weight: 600; }
+.lede, .hint { font-size: 11.5px; color: var(--muted); }
+
+.row.toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.row.toggle input { accent-color: var(--accent); }
+
+.field { display: flex; align-items: center; gap: 10px; }
+.field label { width: 92px; flex: none; color: var(--muted); font-size: 12px; }
+.field input {
+  flex: 1; min-width: 0; padding: 6px 8px; font-size: 12px; font-family: inherit;
+  color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.field input:focus { outline: none; border-color: var(--accent); }
+#port { max-width: 92px; flex: none; }
+
+button {
+  font: inherit; font-size: 12px; padding: 6px 12px; border-radius: 6px; cursor: pointer;
+  color: var(--text); background: var(--surface); border: 1px solid var(--border);
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #0f0f0f; font-weight: 600; }
+button.link { background: none; border: none; color: var(--accent); padding: 2px 4px; }
+
+.actions { display: flex; gap: 8px; margin-top: 2px; }
+
+.status { font-size: 12px; min-height: 18px; display: flex; align-items: center; gap: 6px; }
+.status.ok   { color: var(--ok); }
+.status.warn { color: var(--warn); }
+.status.err  { color: var(--err); }
+.status.idle { color: var(--muted); }

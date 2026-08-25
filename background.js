@@ -6,8 +6,15 @@
  * - Atualiza o badge sempre que o storage mudar
  */
 
+// Pushing the cached reading to the Mac app costs nothing on claude.ai's side, so it
+// runs far more often than the actual quota fetch. That is what keeps the menu bar
+// within a minute of the truth without adding request volume.
+importScripts('bridge.js');
+
 const ALARM = 'quota-poll';
 const POLL_MINUTES = 15;
+const PUSH_ALARM = 'mac-push';
+const PUSH_MINUTES = 1;
 
 /* ── Fetch direto do background (funciona com os cookies do usuário) ── */
 async function fetchPlan(orgId) {
@@ -74,17 +81,28 @@ async function fetchUsage() {
   } catch { /* sem conexão ou sessão expirada */ }
 }
 
+/* ── Ponte para o app da barra de menus do macOS ── */
+// The app cannot reach into the browser on its own; it answers a push with a flag
+// when the user asked for a refresh, and that is when we spend a real request.
+async function pushCycle() {
+  const result = await self.CQMBridge.pushToMac();
+  if (result?.refresh) await fetchUsage();
+}
+
 /* ── Alarme periódico ── */
 chrome.alarms.create(ALARM, { periodInMinutes: POLL_MINUTES });
+chrome.alarms.create(PUSH_ALARM, { periodInMinutes: PUSH_MINUTES });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM) fetchUsage();
+  if (alarm.name === PUSH_ALARM) pushCycle();
 });
 
 /* ── Restaura badge e dispara fetch ao iniciar ── */
 function restoreAndRefresh() {
   chrome.storage.local.get('claudeUsage', ({ claudeUsage }) => {
     updateBadge(claudeUsage);
-    fetchUsage(); // atualiza logo ao abrir o navegador
+    fetchUsage();          // atualiza logo ao abrir o navegador
+    self.CQMBridge.pushToMac();  // e avisa o app do macOS que já existe um valor
   });
 }
 
@@ -133,7 +151,11 @@ function updateBadge(u) {
 }
 
 chrome.storage.onChanged.addListener((changes) => {
-  if (changes.claudeUsage) updateBadge(changes.claudeUsage.newValue);
+  if (!changes.claudeUsage) return;
+  updateBadge(changes.claudeUsage.newValue);
+  // Send straight away rather than waiting for the next push alarm — a reading is
+  // never fresher than the moment it lands.
+  self.CQMBridge.pushToMac();
 });
 
 // Fetch imediato a pedido do popup
