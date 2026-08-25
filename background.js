@@ -90,8 +90,20 @@ async function pushCycle() {
 }
 
 /* ── Alarme periódico ── */
-chrome.alarms.create(ALARM, { periodInMinutes: POLL_MINUTES });
-chrome.alarms.create(PUSH_ALARM, { periodInMinutes: PUSH_MINUTES });
+// chrome.alarms.create replaces any alarm of the same name and restarts its period from
+// zero. MV3 re-runs this whole file on every service-worker wake, and the one-minute push
+// alarm wakes it constantly — so creating the 15-minute poll unconditionally would reset
+// its timer a dozen times before it could ever fire. Create only what is missing.
+function ensureAlarm(name, periodInMinutes) {
+  chrome.alarms.get(name).then((existing) => {
+    if (!existing || existing.periodInMinutes !== periodInMinutes) {
+      chrome.alarms.create(name, { periodInMinutes });
+    }
+  });
+}
+
+ensureAlarm(ALARM, POLL_MINUTES);
+ensureAlarm(PUSH_ALARM, PUSH_MINUTES);
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM) fetchUsage();
   if (alarm.name === PUSH_ALARM) pushCycle();

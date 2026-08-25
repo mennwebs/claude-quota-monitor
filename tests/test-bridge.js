@@ -19,6 +19,48 @@ function loadBridge() {
   return sandbox.CQMBridge;
 }
 
+/**
+ * Loads background.js with a mocked chrome, and reports which alarms it created.
+ * MV3 re-runs this file on every service-worker wake, so "what does a wake create?"
+ * is the question that matters.
+ */
+function loadBackground(existingAlarms) {
+  const created = [];
+  const sandbox = {};
+  vm.createContext(sandbox);
+  sandbox.self = sandbox;
+  sandbox.globalThis = sandbox;
+  sandbox.fetch = async () => ({ ok: false, json: async () => ({}) });
+  sandbox.navigator = { userAgent: '', userAgentData: { brands: [] } };
+  sandbox.importScripts = (file) =>
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), sandbox);
+  const noop = { addListener() {} };
+  sandbox.chrome = {
+    alarms: {
+      async get(name) { return existingAlarms[name]; },
+      create(name, opts) { created.push({ name, ...opts }); },
+      onAlarm: noop
+    },
+    storage: {
+      local: {
+        get(keys, cb) { const r = {}; if (cb) { cb(r); return; } return Promise.resolve(r); },
+        set() { return Promise.resolve(); },
+        remove() {}
+      },
+      onChanged: noop
+    },
+    runtime: { onStartup: noop, onInstalled: noop, onMessage: noop, getURL: (u) => u },
+    action: { setBadgeText() {}, setBadgeBackgroundColor() {}, setTitle() {} },
+    i18n: { getMessage: () => '' },
+    permissions: { async contains() { return false; } },
+    tabs: { create() {} }
+  };
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8'), sandbox);
+  return created;
+}
+
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
 module.exports = async function (describe) {
   const B = loadBridge();
 
@@ -72,5 +114,55 @@ module.exports = async function (describe) {
     const partial = B.buildPayload({ percent: 0 }, null, '', 'Chrome', Date.now());
     assert(partial !== null && partial.limits.five_hour.pct === 0,
       'zero percent is a real reading, not a missing one');
+  });
+
+  await describe('isCacheUsable — identity caching', async (assert) => {
+    const now = Date.now();
+    const complete = { uuid: 'u', email: 'a@b.c', orgId: 'o1', ts: now };
+
+    assert(B.isCacheUsable(complete, 'o1') === true, 'a fresh complete identity is reused');
+    assert(B.isCacheUsable(complete, 'o2') === false, 'a different org invalidates it');
+    assert(B.isCacheUsable(undefined, 'o1') === false, 'nothing cached is not usable');
+    assert(B.isCacheUsable({ ...complete, ts: now - 25 * 3600e3 }, 'o1') === false,
+      'a complete identity expires after a day');
+
+    // The bug this replaced: `cached.orgId === (orgId ?? cached.orgId)` compared a value
+    // with itself when no org was supplied, so the cache never expired by org.
+    assert(B.isCacheUsable(complete, undefined) === true,
+      'no org supplied falls back to the age check, not a self-comparison');
+
+    const orgOnly = { orgId: 'o1', orgName: 'Org', ts: now - 40 * 60e3 };
+    assert(B.isCacheUsable(orgOnly, 'o1') === false,
+      'an org-only identity is a failed probe and is retried within the hour');
+    assert(B.isCacheUsable({ ...orgOnly, ts: now - 60e3 }, 'o1') === true,
+      'but not retried on every single push');
+  });
+
+  await describe('background.js — alarms survive a service-worker wake', async (assert) => {
+    // chrome.alarms.create restarts an existing alarm's period. The worker re-runs this
+    // file every time the 1-minute push alarm wakes it, so an unguarded create would
+    // reset the 15-minute quota poll before it could ever fire.
+    const cold = loadBackground({});
+    await settle();
+    assert(cold.length === 2, 'a cold start creates both alarms');
+    assert(cold.some((a) => a.name === 'quota-poll' && a.periodInMinutes === 15),
+      'quota-poll is created at 15 minutes');
+    assert(cold.some((a) => a.name === 'mac-push' && a.periodInMinutes === 1),
+      'mac-push is created at 1 minute');
+
+    const warm = loadBackground({
+      'quota-poll': { name: 'quota-poll', periodInMinutes: 15 },
+      'mac-push': { name: 'mac-push', periodInMinutes: 1 }
+    });
+    await settle();
+    assert(warm.length === 0, 'a wake with both alarms already armed creates nothing');
+
+    const changed = loadBackground({
+      'quota-poll': { name: 'quota-poll', periodInMinutes: 10 },
+      'mac-push': { name: 'mac-push', periodInMinutes: 1 }
+    });
+    await settle();
+    assert(changed.length === 1 && changed[0].name === 'quota-poll',
+      'an alarm whose period changed is re-created, and only that one');
   });
 };

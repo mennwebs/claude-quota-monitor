@@ -20,6 +20,9 @@
   const STATUS_KEY = 'macBridgeStatus';
   const ACCOUNT_KEY = 'macBridgeAccount';
   const ACCOUNT_TTL_MS = 24 * 60 * 60 * 1000;
+  // An identity that named neither an account nor an email is a failed probe, not a
+  // result. Keep it so there is a coarse key to fall back on, but retry sooner than a day.
+  const ACCOUNT_RETRY_MS = 30 * 60 * 1000;
 
   const DEFAULTS = { enabled: false, port: 47821, token: '', profileName: '' };
 
@@ -164,11 +167,10 @@
     return { orgId, orgName: org?.name ?? null };
   }
 
-  /** Identity changes only on logout, so it is cached for a day. */
+  /** Identity changes only on logout, so a complete one is cached for a day. */
   async function getAccount(orgId, { force = false } = {}) {
     const cached = (await chrome.storage.local.get(ACCOUNT_KEY))[ACCOUNT_KEY];
-    const fresh = cached && Date.now() - (cached.ts || 0) < ACCOUNT_TTL_MS;
-    if (!force && fresh && cached.orgId === (orgId ?? cached.orgId)) return cached;
+    if (!force && isCacheUsable(cached, orgId)) return cached;
 
     const account = (await probeAccount()) || {};
     const org = (await probeOrg(orgId)) || {};
@@ -178,6 +180,18 @@
       return merged;
     }
     return cached || null;
+  }
+
+  /**
+   * Reusable only if it belongs to the same org *and* actually identified the account.
+   * Comparing against `orgId ?? cached.orgId` would compare a value with itself whenever
+   * the caller has no org — a condition that is always true and never invalidates.
+   */
+  function isCacheUsable(cached, orgId) {
+    if (!cached) return false;
+    if (orgId && cached.orgId !== orgId) return false;
+    const complete = !!(cached.uuid || cached.email);
+    return Date.now() - (cached.ts || 0) < (complete ? ACCOUNT_TTL_MS : ACCOUNT_RETRY_MS);
   }
 
   async function setStatus(status) {
@@ -241,7 +255,7 @@
 
   root.CQMBridge = {
     DEFAULTS, LOOPBACK_ORIGIN, CONFIG_KEY, STATUS_KEY, ACCOUNT_KEY,
-    toEpochSeconds, detectBrowser, buildPayload,
+    toEpochSeconds, detectBrowser, buildPayload, isCacheUsable,
     getConfig, setConfig, getAccount,
     hasLoopbackPermission, requestLoopbackPermission,
     pushToMac, checkHealth
