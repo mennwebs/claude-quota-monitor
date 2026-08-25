@@ -45,6 +45,39 @@
     return Number.isNaN(parsed) ? null : Math.floor(parsed / 1000);
   }
 
+  /**
+   * A model display name becomes a stable wire key. claude.ai hands back human names
+   * ("Claude Design", "Opus"); the app needs something it can match on across reports
+   * even if the capitalisation or spacing changes.
+   */
+  function slugModel(name) {
+    return String(name ?? '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 32);
+  }
+
+  /**
+   * Per-model weekly caps. Since extension 1.7.2 these arrive as a dynamic list, because
+   * the API moved them out of the fixed `seven_day_*` fields — which now return null. The
+   * legacy fields are still read so an older profile on the same machine keeps reporting.
+   */
+  function weeklyCategories(usage) {
+    if (Array.isArray(usage.weeklyScoped) && usage.weeklyScoped.length) {
+      return usage.weeklyScoped
+        .filter((c) => c && c.name)
+        .map((c) => ({ name: c.name, percent: c.percent, resetAt: c.resetAt }));
+    }
+    return [
+      ['Opus', usage.opusWeeklyPercent, usage.opusWeeklyResetAt],
+      ['Sonnet', usage.sonnetWeeklyPercent, usage.sonnetWeeklyResetAt],
+      ['Design', usage.designWeeklyPercent, usage.designWeeklyResetAt]
+    ]
+      .filter(([, pct]) => pct !== undefined && pct !== null)
+      .map(([name, percent, resetAt]) => ({ name, percent, resetAt }));
+  }
+
   function detectBrowser(ua, brands) {
     const names = (brands || []).map(b => b.brand).join(' ');
     if (/Brave/i.test(names)) return 'Brave';
@@ -64,17 +97,22 @@
     if (!usage) return null;
 
     const limits = {};
-    const put = (key, pct, resetsAt) => {
+    const put = (key, pct, resetsAt, label) => {
       const n = Number(pct);
       if (pct === undefined || pct === null || !Number.isFinite(n)) return;
       limits[key] = { pct: n, resetsAt: toEpochSeconds(resetsAt) };
+      if (label) limits[key].label = label;
     };
 
     put('five_hour', usage.percent, usage.resetAt);
     put('seven_day', usage.weeklyPercent, usage.weeklyResetAt);
-    put('seven_day_opus', usage.opusWeeklyPercent, usage.opusWeeklyResetAt);
-    put('seven_day_sonnet', usage.sonnetWeeklyPercent, usage.sonnetWeeklyResetAt);
-    put('seven_day_design', usage.designWeeklyPercent, usage.designWeeklyResetAt);
+
+    // Open-ended by design: whatever models the API reports this week get sent, keyed by
+    // slug and carrying the name to display. A new model needs no change on either side.
+    for (const cat of weeklyCategories(usage)) {
+      const slug = slugModel(cat.name);
+      if (slug) put(`weekly:${slug}`, cat.percent, cat.resetAt, String(cat.name).trim());
+    }
 
     if (Object.keys(limits).length === 0) return null;
 
@@ -255,7 +293,7 @@
 
   root.CQMBridge = {
     DEFAULTS, LOOPBACK_ORIGIN, CONFIG_KEY, STATUS_KEY, ACCOUNT_KEY,
-    toEpochSeconds, detectBrowser, buildPayload, isCacheUsable,
+    toEpochSeconds, detectBrowser, buildPayload, isCacheUsable, slugModel, weeklyCategories,
     getConfig, setConfig, getAccount,
     hasLoopbackPermission, requestLoopbackPermission,
     pushToMac, checkHealth

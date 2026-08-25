@@ -7,6 +7,9 @@ import Foundation
 /// should degrade one limit, not throw the whole report away.
 enum Ingest {
 
+    /// Two structural ceilings plus a generous allowance for per-model caps.
+    static let maxLimitsPerReport = 16
+
     // MARK: - Extension payload (POST /v1/usage)
 
     static func extensionReport(_ data: Data, receivedAt: Date = Date()) -> IncomingReport? {
@@ -23,15 +26,27 @@ enum Ingest {
         var limits: [String: LimitReading] = [:]
         if let raw = root["limits"] as? [String: Any] {
             for (key, value) in raw {
-                guard LimitKind(rawValue: key) != nil,
-                      let entry = value as? [String: Any],
+                guard let entry = value as? [String: Any],
                       let pct = numeric(entry["pct"]) else { continue }
-                limits[key] = LimitReading(
+                // Translate what older extension builds send, then check the shape. The
+                // key space is open, so the check is on form rather than on a known list.
+                let alias = LimitID.legacyAliases[key]
+                let id = alias?.id ?? key
+                guard LimitID.isAcceptable(id) else { continue }
+
+                limits[id] = LimitReading(
                     pct: clampPct(pct),
                     resetsAt: parseFlexibleDate(entry["resetsAt"]),
                     observedAt: observedAt,
-                    source: source
+                    source: source,
+                    label: nonEmpty(entry["label"]) ?? alias?.label
                 )
+            }
+            // Open-ended is not the same as unbounded: a report cannot grow the panel
+            // past a plausible number of model ceilings. Sorted so the cut is deterministic.
+            if limits.count > maxLimitsPerReport {
+                let keep = Set(limits.keys.sorted().prefix(maxLimitsPerReport))
+                limits = limits.filter { keep.contains($0.key) }
             }
         }
         guard !limits.isEmpty else { return nil }
@@ -78,14 +93,16 @@ enum Ingest {
         let stamped = min(observedAt, receivedAt)
 
         var limits: [String: LimitReading] = [:]
-        for kind in [LimitKind.fiveHour, .sevenDay] {
-            guard let entry = rl[kind.rawValue] as? [String: Any],
+        // The status line carries only these two. Per-model caps come from the browser.
+        for id in [LimitID.fiveHour, LimitID.sevenDay] {
+            guard let entry = rl[id] as? [String: Any],
                   let pct = numeric(entry["used_percentage"]), pct >= 0 else { continue }
-            limits[kind.rawValue] = LimitReading(
+            limits[id] = LimitReading(
                 pct: clampPct(pct),
                 resetsAt: parseFlexibleDate(entry["resets_at"]),
                 observedAt: stamped,
-                source: .cli
+                source: .cli,
+                label: nil
             )
         }
         guard !limits.isEmpty else { return nil }

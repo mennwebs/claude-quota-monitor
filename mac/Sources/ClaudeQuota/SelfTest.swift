@@ -120,6 +120,58 @@ enum SelfTest {
         check("todayKey is yyyy-MM-dd", key.count == 10 && key.dropFirst(4).first == "-")
         check("todayKey is a Gregorian year, not Buddhist", (Int(key.prefix(4)) ?? 0) < 2400)
 
+        print("\n▸ Ingest — an open-ended limit key space")
+        func report(_ limitsJSON: String) -> IncomingReport? {
+            let body = """
+            {"v":1,"source":"extension","account":{"uuid":"u-1"},
+             "observedAt":1787648000,"limits":\(limitsJSON)}
+            """
+            return Ingest.extensionReport(Data(body.utf8))
+        }
+
+        if let r = report("""
+            {"five_hour":{"pct":41},
+             "weekly:fable":{"pct":34,"label":"Fable"},
+             "weekly:claude-design":{"pct":5,"label":"Claude Design"}}
+            """) {
+            check("a model this code has never heard of is accepted", r.limits["weekly:fable"] != nil)
+            check("its label rides along", r.limits["weekly:fable"]?.label == "Fable")
+            check("a multi-word model name survives slugging", r.limits["weekly:claude-design"]?.label == "Claude Design")
+            check("the well-known ceilings still land", r.limits[LimitID.fiveHour]?.pct == 41)
+        } else { failed += 1; print("  ✗  dynamic report rejected outright") }
+
+        // An older extension build on another profile keeps reporting the old way.
+        if let r = report("{\"seven_day_opus\":{\"pct\":61},\"five_hour\":{\"pct\":10}}") {
+            check("legacy seven_day_opus is translated", r.limits["weekly:opus"] != nil)
+            check("and gains the label it never sent", r.limits["weekly:opus"]?.label == "Opus")
+            check("the old key does not also survive", r.limits["seven_day_opus"] == nil)
+        } else { failed += 1; print("  ✗  legacy report rejected outright") }
+
+        if let r = report("""
+            {"five_hour":{"pct":1},"weekly:UPPER":{"pct":2},"weekly:":{"pct":3},
+             "../../etc/passwd":{"pct":4},"random_key":{"pct":5},
+             "weekly:way-too-long-a-slug-for-any-real-model-name-at-all":{"pct":6}}
+            """) {
+            check("malformed keys are dropped, not rendered", r.limits.count == 1)
+            check("and the good one is kept", r.limits[LimitID.fiveHour]?.pct == 1)
+        } else { failed += 1; print("  ✗  report with one good limit rejected outright") }
+
+        let many = (0..<40).map { "\"weekly:m\($0)\":{\"pct\":\($0)}" }.joined(separator: ",")
+        if let r = report("{\(many)}") {
+            check("a flood of invented models is capped", r.limits.count == Ingest.maxLimitsPerReport)
+        } else { failed += 1; print("  ✗  flood report rejected outright") }
+
+        print("\n▸ Limit — display names")
+        func limit(_ id: String, _ label: String?) -> Limit {
+            Limit(id: id, reading: LimitReading(pct: 0, resetsAt: nil, observedAt: Date(),
+                                                source: .ext, label: label))
+        }
+        check("five_hour shows as 5h", limit(LimitID.fiveHour, nil).short == "5h")
+        check("seven_day shows as 7d", limit(LimitID.sevenDay, nil).short == "7d")
+        check("a model uses the API's own wording", limit("weekly:claude-design", "Claude Design").short == "Claude Design")
+        check("a label-less model falls back to its slug", limit("weekly:fable", nil).short == "Fable")
+        check("the session sorts first", limit(LimitID.fiveHour, nil).rank < limit("weekly:opus", "Opus").rank)
+
         print("\n\(passed) passed, \(failed) failed\n")
         return failed == 0 ? 0 : 1
     }

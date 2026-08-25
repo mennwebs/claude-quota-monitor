@@ -24,9 +24,12 @@ every render, and that blob contains the live `rate_limits`. A shim copies it to
 call, no polling, no extra process — and it is the freshest source there is, updating as you
 work rather than every fifteen minutes.
 
-Neither source is complete on its own. The status line has no Opus ceiling and does not say
-which account it belongs to; the extension does not know about your terminal. Merged, one row
-shows 5h/7d from the CLI within seconds and Opus from the browser.
+Neither source is complete on its own. The status line has no per-model ceilings and does not
+say which account it belongs to; the extension does not know about your terminal. Merged, one
+row shows 5h/7d from the CLI within seconds and the model caps from the browser.
+
+Model ceilings are not a fixed list. claude.ai reports them dynamically, so Fable showed up on
+its own and the next model will too — neither half of this names a model anywhere.
 
 Hooks were the obvious alternative to the status line shim. They do not carry rate limits —
 `statusLine` is the only local carrier.

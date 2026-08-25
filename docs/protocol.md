@@ -20,11 +20,11 @@ Headers: `Content-Type: application/json`, `X-CQM-Token: <token from the app>`
   },
   "observedAt": 1787648000,
   "limits": {
-    "five_hour":        { "pct": 47.0, "resetsAt": 1787660000 },
-    "seven_day":        { "pct": 22.0, "resetsAt": 1788000000 },
-    "seven_day_opus":   { "pct": 61.0, "resetsAt": 1788000000 },
-    "seven_day_sonnet": { "pct":  5.0, "resetsAt": 1788000000 },
-    "seven_day_design": { "pct":  0.0, "resetsAt": 1788000000 }
+    "five_hour":            { "pct": 47.0, "resetsAt": 1787660000 },
+    "seven_day":            { "pct": 22.0, "resetsAt": 1788000000 },
+    "weekly:opus":          { "pct": 61.0, "resetsAt": 1788000000, "label": "Opus" },
+    "weekly:fable":         { "pct": 34.0, "resetsAt": 1788000000, "label": "Fable" },
+    "weekly:claude-design": { "pct":  7.0, "resetsAt": 1788000000, "label": "Claude Design" }
   },
   "extra": { "enabled": true, "used": 12, "limit": 50, "currency": "USD" }
 }
@@ -33,8 +33,18 @@ Headers: `Content-Type: application/json`, `X-CQM-Token: <token from the app>`
 - `observedAt` and `resetsAt` accept unix seconds, millisecond epochs, or ISO-8601. They are
   normalized to seconds on the way in.
 - `observedAt` is clamped to arrival time. A sender with a fast clock must not win every merge.
-- Unknown keys in `limits` are ignored; a report with no recognized limit is rejected, because
-  an empty report would refresh a row's timestamp without refreshing its numbers.
+- The key space is **open**. `five_hour` and `seven_day` are the two structural ceilings;
+  everything else is `weekly:<slug>` for a per-model weekly cap, with `label` carrying the
+  name to display. claude.ai moved these out of fixed `seven_day_opus`-style fields — which now
+  return null — into a dynamic list, so Fable appeared unannounced and the next model will too.
+  Neither side names a model anywhere.
+- `slug` is the display name lowercased with runs of non-alphanumerics collapsed to `-`, capped
+  at 32 characters. Keys that do not fit that shape are dropped, and a single report may carry
+  at most 16 limits: open-ended is not the same as unbounded.
+- The old `seven_day_opus` / `seven_day_sonnet` / `seven_day_design` keys are still accepted and
+  translated, so a profile running an older extension build keeps reporting.
+- A report with no recognized limit is rejected, because an empty report would refresh a row's
+  timestamp without refreshing its numbers.
 - Identity is matched account → email → org, in that order. Several accounts can belong to one
   Team organization, so `orgId` alone is not an identity.
 

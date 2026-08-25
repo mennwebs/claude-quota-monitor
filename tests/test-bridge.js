@@ -100,7 +100,7 @@ module.exports = async function (describe) {
     assert(p.observedAt === 1787648000, 'observedAt is seconds, from the reading not from now');
     assert(Object.keys(p.limits).length === 3, 'only limits that exist are sent');
     assert(p.limits.five_hour.pct === 47, 'five_hour percentage carried');
-    assert(p.limits.seven_day_opus.resetsAt === null, 'a limit without a reset time still sends');
+    assert(p.limits['weekly:opus'].resetsAt === null, 'a limit without a reset time still sends');
     assert(p.extra.used === 12 && p.extra.currency === 'USD', 'extra usage credits carried');
 
     const named = B.buildPayload(usage, null, '  work  ', 'Chrome', Date.now());
@@ -114,6 +114,52 @@ module.exports = async function (describe) {
     const partial = B.buildPayload({ percent: 0 }, null, '', 'Chrome', Date.now());
     assert(partial !== null && partial.limits.five_hour.pct === 0,
       'zero percent is a real reading, not a missing one');
+  });
+
+  await describe('slugModel — model names become wire keys', async (assert) => {
+    assert(B.slugModel('Opus') === 'opus', 'simple name lowercases');
+    assert(B.slugModel('Claude Design') === 'claude-design', 'spaces become hyphens');
+    assert(B.slugModel('  Sonnet 4.5  ') === 'sonnet-4-5', 'punctuation and padding collapse');
+    assert(B.slugModel('') === '', 'an empty name yields no key');
+    assert(B.slugModel('!!!') === '', 'a name with nothing usable yields no key');
+    assert(B.slugModel('x'.repeat(60)).length === 32, 'a runaway name is capped');
+  });
+
+  await describe('weeklyCategories — dynamic list, legacy fallback', async (assert) => {
+    // Extension 1.7.2 moved per-model caps into a dynamic list because the API stopped
+    // filling the seven_day_* fields. Both shapes have to work: profiles update one at a time.
+    const dynamic = B.weeklyCategories({
+      weeklyScoped: [{ name: 'Fable', percent: 34 }, { name: 'Opus', percent: 61 }]
+    });
+    assert(dynamic.length === 2 && dynamic[0].name === 'Fable', 'the dynamic list is used as-is');
+
+    const legacy = B.weeklyCategories({ opusWeeklyPercent: 61, sonnetWeeklyPercent: 12 });
+    assert(legacy.length === 2, 'legacy fields are read when there is no list');
+    assert(legacy.some((c) => c.name === 'Opus' && c.percent === 61), 'legacy Opus carried');
+
+    assert(B.weeklyCategories({}).length === 0, 'neither shape present yields nothing');
+    assert(B.weeklyCategories({ weeklyScoped: [{ percent: 5 }] }).length === 0,
+      'an entry with no model name is dropped rather than keyed as empty');
+    assert(B.weeklyCategories({ weeklyScoped: [], opusWeeklyPercent: 61 }).length === 1,
+      'an empty list falls back rather than reporting nothing');
+  });
+
+  await describe('buildPayload — dynamic model ceilings', async (assert) => {
+    const p = B.buildPayload({
+      percent: 41,
+      weeklyScoped: [
+        { name: 'Opus', percent: 61, resetAt: 1787994000 },
+        { name: 'Claude Design', percent: 5, resetAt: null }
+      ],
+      ts: 1787648000000
+    }, { uuid: 'u' }, '', 'Chrome', Date.now());
+
+    assert(p.limits['weekly:opus'].pct === 61, 'a model cap is keyed by slug');
+    assert(p.limits['weekly:opus'].label === 'Opus', 'and carries its display name');
+    assert(p.limits['weekly:claude-design'].label === 'Claude Design',
+      'a multi-word model keeps its wording for display');
+    assert(p.limits.five_hour.label === undefined,
+      'the well-known ceilings send no label — they name themselves');
   });
 
   await describe('isCacheUsable — identity caching', async (assert) => {

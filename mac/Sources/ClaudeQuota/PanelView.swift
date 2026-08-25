@@ -153,9 +153,8 @@ struct AccountRow: View {
                 }
             }
 
-            ForEach(account.orderedLimits, id: \.0) { kind, reading in
-                LimitRow(kind: kind, reading: reading,
-                         thresholds: store.settings.thresholds, now: now)
+            ForEach(account.orderedLimits) { limit in
+                LimitRow(limit: limit, thresholds: store.settings.thresholds, now: now)
             }
 
             if let extra = account.extra, extra.enabled, extra.limit > 0 {
@@ -189,11 +188,11 @@ private struct SourceBadges: View {
 // MARK: - One limit
 
 struct LimitRow: View {
-    let kind: LimitKind
-    let reading: LimitReading
+    let limit: Limit
     let thresholds: FreshnessThresholds
     let now: Date
 
+    private var reading: LimitReading { limit.reading }
     private var expired: Bool { reading.expired(at: now) }
     private var pct: Double { reading.effectivePct(at: now) }
     /// This reading's own age. An account can be reporting every second and still be
@@ -202,10 +201,12 @@ struct LimitRow: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            Text(kind.short)
+            Text(limit.short)
                 .font(.system(size: 10, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
-                .frame(width: 38, alignment: .leading)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: 46, alignment: .leading)
 
             QuotaBar(pct: pct, freshness: freshness, hollow: expired)
                 .frame(height: Theme.barHeight)
@@ -273,7 +274,7 @@ private struct ExtraRow: View {
             Text("เครดิต")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.secondary)
-                .frame(width: 38, alignment: .leading)
+                .frame(width: 46, alignment: .leading)
             QuotaBar(pct: extra.pct, freshness: freshness)
                 .frame(height: Theme.barHeight)
             Text(Fmt.pct(extra.pct))

@@ -50,7 +50,7 @@ struct MenuBarLabel: View {
 
     private var bars: [MenuBarIcon.Bar] {
         store.visibleAccounts.map { account in
-            guard let (_, reading) = account.binding(at: store.now) else {
+            guard let reading = account.binding(at: store.now)?.reading else {
                 return MenuBarIcon.Bar(pct: 0, color: .systemGray, grayed: true, awaitingReset: false)
             }
             // The bar's own reading decides whether it is trustworthy. The account may
@@ -70,7 +70,7 @@ struct MenuBarLabel: View {
     /// figure from this morning would sit in the menu bar looking current.
     private var worst: Double? {
         store.visibleAccounts
-            .compactMap { $0.binding(at: store.now)?.1 }
+            .compactMap { $0.binding(at: store.now)?.reading }
             .filter { $0.freshness(at: store.now, thresholds: store.settings.thresholds) < .stale }
             .map { $0.effectivePct(at: store.now) }
             .max()

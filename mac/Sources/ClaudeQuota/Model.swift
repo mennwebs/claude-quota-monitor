@@ -2,33 +2,59 @@ import Foundation
 
 // MARK: - Limits
 
-/// The quota ceilings Claude exposes. Not every plan has every one: `seven_day_opus`
-/// only exists where Opus has its own weekly cap, and `seven_day_design` is Claude Design.
-enum LimitKind: String, Codable, CaseIterable, Sendable {
-    case fiveHour  = "five_hour"
-    case sevenDay  = "seven_day"
-    case opus      = "seven_day_opus"
-    case sonnet    = "seven_day_sonnet"
-    case design    = "seven_day_design"
+/// Limit identities as they travel on the wire.
+///
+/// The set is open-ended on purpose. claude.ai moved per-model weekly caps out of fixed
+/// `seven_day_opus`-style fields — which now return null — into a dynamic `limits` array,
+/// so Fable showed up unannounced and the next model will too. Only the two structural
+/// ceilings are named here; every model cap is `weekly:<slug>` and carries its own label.
+enum LimitID {
+    static let fiveHour = "five_hour"
+    static let sevenDay = "seven_day"
+    static let weeklyPrefix = "weekly:"
 
+    static func isWellKnown(_ raw: String) -> Bool { raw == fiveHour || raw == sevenDay }
+
+    /// An open key space still needs a shape, or a malformed report could invent rows.
+    static func isAcceptable(_ raw: String) -> Bool {
+        if isWellKnown(raw) { return true }
+        guard raw.hasPrefix(weeklyPrefix) else { return false }
+        let slug = raw.dropFirst(weeklyPrefix.count)
+        guard !slug.isEmpty, slug.count <= 32 else { return false }
+        return slug.allSatisfy { ($0.isLetter && $0.isLowercase) || $0.isNumber || $0 == "-" }
+    }
+
+    /// Extension builds before the dynamic-limits change still send these.
+    static let legacyAliases: [String: (id: String, label: String)] = [
+        "seven_day_opus":   (weeklyPrefix + "opus", "Opus"),
+        "seven_day_sonnet": (weeklyPrefix + "sonnet", "Sonnet"),
+        "seven_day_design": (weeklyPrefix + "design", "Design")
+    ]
+}
+
+/// One limit, ready to render: its wire key plus the reading behind it.
+struct Limit: Identifiable, Equatable, Sendable {
+    let id: String
+    let reading: LimitReading
+
+    /// What the row is called. Model caps use the name the API gave them, so a model this
+    /// code has never heard of still labels itself correctly.
     var short: String {
-        switch self {
-        case .fiveHour: return "5h"
-        case .sevenDay: return "7d"
-        case .opus:     return "Opus"
-        case .sonnet:   return "Sonnet"
-        case .design:   return "Design"
+        switch id {
+        case LimitID.fiveHour: return "5h"
+        case LimitID.sevenDay: return "7d"
+        default:
+            if let label = reading.label, !label.isEmpty { return label }
+            return String(id.dropFirst(LimitID.weeklyPrefix.count)).capitalized
         }
     }
 
-    /// Panel order. `five_hour` first because it is the one that actually stops you today.
+    /// Panel order: the 5-hour window first, because it is the one that stops you today.
     var rank: Int {
-        switch self {
-        case .fiveHour: return 0
-        case .sevenDay: return 1
-        case .opus:     return 2
-        case .sonnet:   return 3
-        case .design:   return 4
+        switch id {
+        case LimitID.fiveHour: return 0
+        case LimitID.sevenDay: return 1
+        default: return 2
         }
     }
 }
@@ -48,6 +74,9 @@ struct LimitReading: Codable, Equatable, Sendable {
     var resetsAt: Date?
     var observedAt: Date
     var source: ReadingSource
+    /// Display name for a per-model cap, as the API worded it. nil for the two
+    /// well-known ceilings, which name themselves.
+    var label: String?
 
     /// A window that is past its reset is empty again, even though nobody has
     /// confirmed it yet. Callers should mark this state visually rather than
@@ -144,19 +173,15 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         limits.values.map(\.observedAt).max()
     }
 
-    func reading(_ kind: LimitKind) -> LimitReading? { limits[kind.rawValue] }
-
-    var orderedLimits: [(LimitKind, LimitReading)] {
-        LimitKind.allCases.compactMap { k in limits[k.rawValue].map { (k, $0) } }
-            .sorted { $0.0.rank < $1.0.rank }
+    var orderedLimits: [Limit] {
+        limits.map { Limit(id: $0.key, reading: $0.value) }
+            .sorted { ($0.rank, $0.short) < ($1.rank, $1.short) }
     }
 
     /// The ceiling closest to blocking you. Weekly Opus routinely binds before the
     /// 5-hour window does, so "how full am I" cannot just read `five_hour`.
-    func binding(at now: Date) -> (LimitKind, LimitReading)? {
-        orderedLimits.max { a, b in
-            a.1.effectivePct(at: now) < b.1.effectivePct(at: now)
-        }
+    func binding(at now: Date) -> Limit? {
+        orderedLimits.max { $0.reading.effectivePct(at: now) < $1.reading.effectivePct(at: now) }
     }
 
     /// How recently this account was heard from at all — for the row header. Individual

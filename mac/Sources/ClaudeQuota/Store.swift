@@ -262,7 +262,22 @@ final class Store: ObservableObject {
         guard let d = try? Data(contentsOf: Paths.state),
               let s = try? JSONIO.decoder.decode(PersistedState.self, from: d)
         else { return [] }
-        return s.accounts
+        return s.accounts.map(migrateLegacyLimits)
+    }
+
+    /// State written before per-model caps became dynamic is keyed `seven_day_opus` and
+    /// carries no label. Left alone it would render as "Seven day opus" and never merge
+    /// with the `weekly:opus` a current extension sends.
+    private static func migrateLegacyLimits(_ account: AccountSnapshot) -> AccountSnapshot {
+        var migrated = account
+        for (old, new) in LimitID.legacyAliases {
+            guard var reading = migrated.limits.removeValue(forKey: old) else { continue }
+            reading.label = reading.label ?? new.label
+            if (migrated.limits[new.id]?.observedAt ?? .distantPast) < reading.observedAt {
+                migrated.limits[new.id] = reading
+            }
+        }
+        return migrated
     }
 
     /// Reports arrive far more often than the disk needs to hear about them; coalesce.
