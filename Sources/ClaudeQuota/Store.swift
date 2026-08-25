@@ -9,15 +9,23 @@ import SwiftUI
 /// cache. No extra polling, no extra requests.
 final class RefreshFlag: @unchecked Sendable {
     private let lock = NSLock()
-    private var raised = false
+    private var openUntil = Date.distantPast
+    private let window: TimeInterval
 
-    func raise() { lock.lock(); raised = true; lock.unlock() }
+    /// The window has to outlast one full push cycle so every profile sees the request.
+    init(window: TimeInterval = 90) { self.window = window }
 
-    func consume() -> Bool {
+    func raise() {
         lock.lock(); defer { lock.unlock() }
-        let v = raised
-        raised = false
-        return v
+        openUntil = Date().addingTimeInterval(window)
+    }
+
+    /// Deliberately not destructive. Each profile's service worker checks in on its own
+    /// minute, so a flag consumed by the first caller would refresh one account and
+    /// leave the other three untouched — which is not what pressing Refresh means.
+    func shouldRefresh() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return Date() < openUntil
     }
 }
 
@@ -57,7 +65,7 @@ final class Store: ObservableObject {
                 }
                 // Reading the flag is lock-guarded, so it can be answered on the
                 // server's own queue without hopping to the main actor first.
-                return LoopbackServer.ReportAck(refresh: flag.consume())
+                return LoopbackServer.ReportAck(refresh: flag.shouldRefresh())
             },
             onState: { [weak self] st in
                 Task { @MainActor [weak self] in self?.serverState = st }
@@ -115,7 +123,11 @@ final class Store: ObservableObject {
     private func matchIndex(for r: IncomingReport) -> Int? {
         if let u = r.accountUuid, let i = accounts.firstIndex(where: { $0.accountUuid == u }) { return i }
         if let e = r.email, let i = accounts.firstIndex(where: { $0.email == e }) { return i }
-        if let o = r.orgId, let i = accounts.firstIndex(where: { $0.orgId == o && $0.accountUuid == nil }) { return i }
+        // Only when *neither* side names an account. Several accounts can belong to one
+        // Team organization, so an org match between a report that knows its uuid and a
+        // row that does not is not evidence they are the same person.
+        if let o = r.orgId, r.accountUuid == nil,
+           let i = accounts.firstIndex(where: { $0.orgId == o && $0.accountUuid == nil }) { return i }
         if let k = r.preferredKey, let i = accounts.firstIndex(where: { $0.key == k }) { return i }
         return nil
     }

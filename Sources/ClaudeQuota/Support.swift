@@ -150,6 +150,7 @@ enum Fmt {
         let cal = Calendar.current
         let f = DateFormatter()
         f.locale = Locale(identifier: "th_TH")
+        f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = cal.isDate(date, inSameDayAs: now) ? "HH:mm" : "EEE HH:mm"
         return f.string(from: date)
     }
@@ -190,8 +191,15 @@ enum Fmt {
         return s.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
+    /// Must match the keys Claude Code writes into stats-cache.json, which are plain
+    /// Gregorian ISO dates. `Locale.current` on a Thai-configured Mac carries the
+    /// Buddhist calendar, so an unpinned formatter yields "2569-08-25" — every lookup
+    /// misses and the cache looks permanently out of date.
     static var todayKey: String {
         let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = .current
         f.dateFormat = "yyyy-MM-dd"
         return f.string(from: Date())
     }

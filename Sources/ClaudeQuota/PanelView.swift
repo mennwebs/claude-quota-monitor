@@ -154,11 +154,12 @@ struct AccountRow: View {
             }
 
             ForEach(account.orderedLimits, id: \.0) { kind, reading in
-                LimitRow(kind: kind, reading: reading, freshness: freshness, now: now)
+                LimitRow(kind: kind, reading: reading,
+                         thresholds: store.settings.thresholds, now: now)
             }
 
             if let extra = account.extra, extra.enabled, extra.limit > 0 {
-                ExtraRow(extra: extra, freshness: freshness)
+                ExtraRow(extra: extra, thresholds: store.settings.thresholds, now: now)
             }
         }
         .padding(.horizontal, 12)
@@ -190,11 +191,14 @@ private struct SourceBadges: View {
 struct LimitRow: View {
     let kind: LimitKind
     let reading: LimitReading
-    let freshness: Freshness
+    let thresholds: FreshnessThresholds
     let now: Date
 
     private var expired: Bool { reading.expired(at: now) }
     private var pct: Double { reading.effectivePct(at: now) }
+    /// This reading's own age. An account can be reporting every second and still be
+    /// showing an Opus figure from three hours ago.
+    private var freshness: Freshness { reading.freshness(at: now, thresholds: thresholds) }
 
     var body: some View {
         HStack(spacing: 7) {
@@ -257,7 +261,12 @@ struct QuotaBar: View {
 
 private struct ExtraRow: View {
     let extra: ExtraUsage
-    let freshness: Freshness
+    let thresholds: FreshnessThresholds
+    let now: Date
+
+    private var freshness: Freshness {
+        Freshness.of(now.timeIntervalSince(extra.observedAt), thresholds: thresholds)
+    }
 
     var body: some View {
         HStack(spacing: 7) {

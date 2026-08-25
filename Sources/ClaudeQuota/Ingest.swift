@@ -72,6 +72,11 @@ enum Ingest {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let rl = root["rate_limits"] as? [String: Any] else { return nil }
 
+        // Same clamp the extension path applies. The observation time here is a file
+        // mtime, and a clock that jumps forward — or a file restored from a backup —
+        // would otherwise stamp a reading in the future that wins every merge for good.
+        let stamped = min(observedAt, receivedAt)
+
         var limits: [String: LimitReading] = [:]
         for kind in [LimitKind.fiveHour, .sevenDay] {
             guard let entry = rl[kind.rawValue] as? [String: Any],
@@ -79,7 +84,7 @@ enum Ingest {
             limits[kind.rawValue] = LimitReading(
                 pct: clampPct(pct),
                 resetsAt: parseFlexibleDate(entry["resets_at"]),
-                observedAt: observedAt,
+                observedAt: stamped,
                 source: .cli
             )
         }

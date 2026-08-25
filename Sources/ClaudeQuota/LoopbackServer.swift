@@ -19,10 +19,16 @@ final class LoopbackServer {
     private let queue = DispatchQueue(label: "com.mennwebs.cqm.server")
     private var listener: NWListener?
     private var live: [ObjectIdentifier: NWConnection] = [:]
+    private var liveOrder: [ObjectIdentifier] = []
     private var token: String = ""
 
     /// 256 KB is far beyond any real report; anything larger is dropped unread.
     private let maxRequestBytes = 256 * 1024
+    /// Every local process can reach this port. A request that never completes must not
+    /// be able to hold a file descriptor open indefinitely, or enough of them to stop
+    /// the listener accepting the one request that matters.
+    private let maxLiveConnections = 32
+    private let requestDeadline: TimeInterval = 10
 
     private let onReport: @Sendable (Data) -> ReportAck
     private let onState: @Sendable (ServerState) -> Void
@@ -56,8 +62,12 @@ final class LoopbackServer {
 
             do {
                 let l = try NWListener(using: params)
-                l.stateUpdateHandler = { [weak self] st in
-                    guard let self else { return }
+                l.stateUpdateHandler = { [weak self, weak l] st in
+                    // A cancelled listener still delivers `.cancelled` — and possibly a
+                    // late `.waiting` naming the *old* port — after its replacement is
+                    // already live. Without this check the loser of that race is what
+                    // the user sees: "server stopped" over a server that is running.
+                    guard let self, let l, self.listener === l else { return }
                     switch st {
                     case .ready:  self.onState(.listening(port))
                     case .failed(let e), .waiting(let e):
@@ -75,13 +85,21 @@ final class LoopbackServer {
         }
     }
 
-    func stop() { queue.async { [weak self] in self?.stopLocked() } }
+    func stop() {
+        queue.async { [weak self] in
+            self?.stopLocked()
+            // stopLocked() clears `listener`, so the identity guard above will swallow
+            // the listener's own `.cancelled`. Announce the stop here instead.
+            self?.onState(.stopped)
+        }
+    }
 
     private func stopLocked() {
         listener?.cancel()
         listener = nil
         live.values.forEach { $0.cancel() }
         live.removeAll()
+        liveOrder.removeAll()
     }
 
     private static func describe(_ error: Error, port: UInt16) -> String {
@@ -94,17 +112,35 @@ final class LoopbackServer {
     // MARK: - Connection handling
 
     private func accept(_ conn: NWConnection) {
+        // At capacity, drop the oldest rather than refuse the newest. A real exchange is
+        // over in milliseconds, so the oldest connection is the one stalling — turning
+        // away the new arrival would let a flood lock out the request that matters.
+        while liveOrder.count >= maxLiveConnections, let oldest = liveOrder.first {
+            liveOrder.removeFirst()
+            live.removeValue(forKey: oldest)?.cancel()
+        }
+
         let id = ObjectIdentifier(conn)
         live[id] = conn
+        liveOrder.append(id)
         conn.stateUpdateHandler = { [weak self] st in
             switch st {
             case .failed, .cancelled:
-                self?.queue.async { self?.live.removeValue(forKey: id) }
+                self?.queue.async { self?.release(id) }
             default: break
             }
         }
+        // Unconditional, and safe as a blanket rule: every reply sends `Connection: close`
+        // and cancels in its completion handler, so a well-behaved exchange is long over
+        // by now and cancelling twice is a no-op.
+        queue.asyncAfter(deadline: .now() + requestDeadline) { conn.cancel() }
         conn.start(queue: queue)
         read(conn, buffer: Data())
+    }
+
+    private func release(_ id: ObjectIdentifier) {
+        live.removeValue(forKey: id)
+        liveOrder.removeAll { $0 == id }
     }
 
     private func read(_ conn: NWConnection, buffer: Data) {

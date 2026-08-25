@@ -91,6 +91,35 @@ enum SelfTest {
             check("path round-trips", command(in: out) == #"/a "quoted"/b\c.sh"#)
         } else { failed += 1; print("  ✗  patch returned nil") }
 
+        print("\n▸ JSONTextPatch — empty and near-empty objects (no trailing comma)")
+        // JSONSerialization parses `{"a":1,}` happily; Claude Code's JSON.parse does not.
+        // These are the shapes that produced one.
+        for source in ["{}", "{\n}\n", "{ }", "{\n\n}"] {
+            if let out = try? JSONTextPatch.setStatusLineCommand(in: source, to: "/shim.sh") {
+                check("\(source.debugDescription) -> no trailing comma", !JSONTextPatch.hasTrailingComma(out))
+                check("\(source.debugDescription) -> command set", command(in: out) == "/shim.sh")
+                check("\(source.debugDescription) -> parses strictly", valid(out) && !JSONTextPatch.hasTrailingComma(out))
+            } else { failed += 1; print("  ✗  \(source.debugDescription) patch returned nil") }
+        }
+        if let out = try? JSONTextPatch.setStatusLineCommand(in: "{\"statusLine\": {}}", to: "/shim.sh") {
+            check("empty statusLine object -> no trailing comma", !JSONTextPatch.hasTrailingComma(out))
+            check("empty statusLine object -> command set", command(in: out) == "/shim.sh")
+        } else { failed += 1; print("  ✗  empty statusLine patch returned nil") }
+
+        print("\n▸ hasTrailingComma")
+        check("detects object trailing comma", JSONTextPatch.hasTrailingComma("{\"a\": 1,}"))
+        check("detects array trailing comma", JSONTextPatch.hasTrailingComma("{\"a\": [1,]}"))
+        check("detects across newlines", JSONTextPatch.hasTrailingComma("{\"a\": 1,\n}"))
+        check("clean object passes", !JSONTextPatch.hasTrailingComma("{\"a\": 1, \"b\": 2}"))
+        check("comma inside a string is not one", !JSONTextPatch.hasTrailingComma("{\"a\": \"x,}\"}"))
+
+        print("\n▸ Fmt.todayKey — calendar independence")
+        // A Thai-configured Mac defaults to the Buddhist calendar, which would render
+        // this year as 2569 and miss every key in stats-cache.json.
+        let key = Fmt.todayKey
+        check("todayKey is yyyy-MM-dd", key.count == 10 && key.dropFirst(4).first == "-")
+        check("todayKey is a Gregorian year, not Buddhist", (Int(key.prefix(4)) ?? 0) < 2400)
+
         print("\n\(passed) passed, \(failed) failed\n")
         return failed == 0 ? 0 : 1
     }

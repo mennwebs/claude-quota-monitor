@@ -45,6 +45,10 @@ fetching every fifteen. Open the app and it is current within a minute.
 
 The point of the thing is to be trusted at a glance, so it never dresses up what it does not know.
 
+Ages are tracked **per limit, not per account**. The two sources cover different ceilings —
+the status line never reports Opus — so an account can be refreshing 5h every second while its
+Opus figure quietly goes hours old. Each row is dimmed on its own clock.
+
 | Situation | What you see |
 |---|---|
 | Read within 3 minutes | full colour |

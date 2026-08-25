@@ -158,7 +158,8 @@ enum StatuslineInstaller {
 
         let patched = try edit(text)
         guard let data = patched.data(using: .utf8),
-              (try? JSONSerialization.jsonObject(with: data)) != nil
+              (try? JSONSerialization.jsonObject(with: data)) != nil,
+              !JSONTextPatch.hasTrailingComma(patched)
         else { throw JSONTextPatch.PatchError.unparsable("ผลลัพธ์ไม่ใช่ JSON ที่ถูกต้อง") }
 
         try FileManager.default.createDirectory(at: claudeSettings.deletingLastPathComponent(),

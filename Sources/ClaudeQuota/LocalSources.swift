@@ -20,6 +20,7 @@ final class LocalSources {
     private var cliDumpStamp: Date?
     private var configStamp: Date?
     private var statsStamp: Date?
+    private var statsMissing = false
     private var identity: CLIIdentity?
 
     private var wantStatusline = true
@@ -36,7 +37,7 @@ final class LocalSources {
             guard let self else { return }
             self.wantStatusline = statusline
             self.wantStats = stats
-            if !stats { self.onStats(nil) }
+            if !stats { self.statsMissing = true; self.onStats(nil) }
             // Force a re-read on the next tick so a toggle takes effect immediately.
             self.cliDumpStamp = nil
             self.statsStamp = nil
@@ -95,7 +96,17 @@ final class LocalSources {
     }
 
     private func refreshStats() {
-        guard let m = Self.modified(Paths.statsCache) else { onStats(nil); return }
+        guard let m = Self.modified(Paths.statsCache) else {
+            // Say "gone" once. Repeating it every second would wake the main actor and
+            // republish an unchanged nil forever, for a file that is simply not there.
+            if !statsMissing {
+                statsMissing = true
+                statsStamp = nil
+                onStats(nil)
+            }
+            return
+        }
+        statsMissing = false
         guard m != statsStamp else { return }
         statsStamp = m
         onStats(StatsReader.read())

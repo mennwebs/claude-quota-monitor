@@ -27,7 +27,11 @@ enum JSONTextPatch {
         }
 
         guard let statusLine = findMember("statusLine", in: chars, objectOpenAt: rootOpen) else {
-            let insert = "\n  \"statusLine\": { \"type\": \"command\", \"command\": \(quote(command)) },"
+            // No comma when there is nothing to separate from. JSONSerialization happily
+            // parses `{"a":1,}`, but Claude Code reads this file with JSON.parse, which
+            // does not — so a trailing comma here is a file it can no longer start with.
+            let sep = isEmptyObject(chars, openAt: rootOpen) ? "" : ","
+            let insert = "\n  \"statusLine\": { \"type\": \"command\", \"command\": \(quote(command)) }\(sep)"
             return String(chars[..<(rootOpen + 1)]) + insert + String(chars[(rootOpen + 1)...])
         }
         guard chars[statusLine.valueStart] == "{" else {
@@ -40,7 +44,8 @@ enum JSONTextPatch {
                 + String(chars[(commandMember.valueEnd + 1)...])
         }
 
-        let insert = " \"command\": \(quote(command)),"
+        let sep = isEmptyObject(chars, openAt: statusLine.valueStart) ? "" : ","
+        let insert = " \"command\": \(quote(command))\(sep)"
         return String(chars[...statusLine.valueStart]) + insert + String(chars[(statusLine.valueStart + 1)...])
     }
 
@@ -72,6 +77,34 @@ enum JSONTextPatch {
         if start > 0, chars[start - 1] == "\n", end < chars.count, chars[end] == "\n" { start -= 1 }
 
         return String(chars[..<start]) + String(chars[end...])
+    }
+
+    /// True when `{` at `openAt` closes with nothing but whitespace inside.
+    private static func isEmptyObject(_ chars: [Character], openAt: Int) -> Bool {
+        var i = openAt + 1
+        while i < chars.count, chars[i].isWhitespace { i += 1 }
+        return i < chars.count && chars[i] == "}"
+    }
+
+    /// `JSONSerialization` accepts trailing commas; the parsers that will actually read
+    /// this file do not. Anything written here has to pass the stricter bar.
+    static func hasTrailingComma(_ text: String) -> Bool {
+        let chars = Array(text)
+        var i = 0
+        while i < chars.count {
+            if chars[i] == "\"" {
+                guard let end = endOfString(in: chars, from: i) else { return false }
+                i = end + 1
+                continue
+            }
+            if chars[i] == "," {
+                var j = i + 1
+                while j < chars.count, chars[j].isWhitespace { j += 1 }
+                if j < chars.count, chars[j] == "}" || chars[j] == "]" { return true }
+            }
+            i += 1
+        }
+        return false
     }
 
     // MARK: - Scanning

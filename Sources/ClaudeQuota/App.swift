@@ -50,10 +50,12 @@ struct MenuBarLabel: View {
 
     private var bars: [MenuBarIcon.Bar] {
         store.visibleAccounts.map { account in
-            let freshness = account.freshness(at: store.now, thresholds: store.settings.thresholds)
             guard let (_, reading) = account.binding(at: store.now) else {
                 return MenuBarIcon.Bar(pct: 0, color: .systemGray, grayed: true, awaitingReset: false)
             }
+            // The bar's own reading decides whether it is trustworthy. The account may
+            // be refreshing another limit constantly while this one goes stale.
+            let freshness = reading.freshness(at: store.now, thresholds: store.settings.thresholds)
             let pct = reading.effectivePct(at: store.now)
             return MenuBarIcon.Bar(
                 pct: pct,
@@ -64,12 +66,13 @@ struct MenuBarLabel: View {
         }
     }
 
-    /// Only accounts we still believe get to drive the headline number — otherwise a
+    /// Only readings we still believe get to drive the headline number — otherwise a
     /// figure from this morning would sit in the menu bar looking current.
     private var worst: Double? {
         store.visibleAccounts
+            .compactMap { $0.binding(at: store.now)?.1 }
             .filter { $0.freshness(at: store.now, thresholds: store.settings.thresholds) < .stale }
-            .compactMap { $0.binding(at: store.now)?.1.effectivePct(at: store.now) }
+            .map { $0.effectivePct(at: store.now) }
             .max()
     }
 }

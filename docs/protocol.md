@@ -47,6 +47,10 @@ Reply:
 `refresh: true` means the user pressed Refresh in the menu bar. That is the only way the Mac
 side can reach into the browser: the sender should spend one real fetch and post the result.
 
+The flag stays raised for 90 seconds rather than being consumed by the first caller. Each
+profile checks in on its own minute, so a destructive read would refresh one account and leave
+the rest untouched — which is not what pressing Refresh means.
+
 ## `GET /v1/health`
 
 Unauthenticated, so a client can tell "app is not running" from "token is wrong".
@@ -59,6 +63,10 @@ Unauthenticated, so a client can tell "app is not running" from "token is wrong"
 
 `OPTIONS` returns 204. Any other path returns 404. Bodies over 256 KB return 413. CORS headers
 are echoed back only for a `chrome-extension://` origin.
+
+Every local process can reach the port, so a connection is cancelled 10 seconds after it is
+accepted and at most 32 are held at once. A peer that opens a socket and never finishes a
+request cannot hold a file descriptor, or crowd out the request that matters.
 
 ## The status line source
 

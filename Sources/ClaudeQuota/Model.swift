@@ -58,6 +58,14 @@ struct LimitReading: Codable, Equatable, Sendable {
     }
 
     func effectivePct(at now: Date) -> Double { expired(at: now) ? 0 : pct }
+
+    /// Each limit ages on its own clock. The two sources cover different limits — the
+    /// status line never reports Opus — so an account can be refreshed every second
+    /// while its Opus number quietly goes hours stale. Dimming the row by the account's
+    /// newest reading would present that stale number as current.
+    func freshness(at now: Date, thresholds: FreshnessThresholds) -> Freshness {
+        Freshness.of(now.timeIntervalSince(observedAt), thresholds: thresholds)
+    }
 }
 
 // MARK: - Freshness
@@ -151,6 +159,8 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
+    /// How recently this account was heard from at all — for the row header. Individual
+    /// limits carry their own, older, ages; see `LimitReading.freshness`.
     func freshness(at now: Date, thresholds: FreshnessThresholds) -> Freshness {
         guard let o = observedAt else { return .dead }
         return Freshness.of(now.timeIntervalSince(o), thresholds: thresholds)
