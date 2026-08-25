@@ -257,9 +257,12 @@ private struct LocalSettings: View {
             Section("สถิติในเครื่อง") {
                 Toggle("อ่าน ~/.claude/stats-cache.json", isOn: $store.settings.readStatsCache)
                 if let stats = store.stats {
+                    let day = stats.shown(today: Fmt.todayKey)
                     LabeledContent("คำนวณถึง") { Text(stats.lastComputedDate).monospacedDigit() }
-                    LabeledContent("วันนี้") {
-                        Text("\(Fmt.tokens(stats.todayTokens)) tok · \(stats.todayMessages) ข้อความ")
+                    // Same reason as the panel: on a cache that has not been recomputed
+                    // today, "วันนี้" is zero, which reads as no work rather than no count.
+                    LabeledContent(stats.isBehind(today: Fmt.todayKey) ? Fmt.shortDay(day.date) : "วันนี้") {
+                        Text("\(Fmt.tokens(day.tokens)) tok · \(day.messages) ข้อความ")
                             .monospacedDigit()
                     }
                 }

@@ -20,10 +20,13 @@ struct ClaudeQuotaApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var appearanceObserver: Any?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menu bar only: no Dock tile, no window on launch. `LSUIElement` in Info.plist
         // covers the bundled case; this covers running the binary straight from `.build`.
         NSApp.setActivationPolicy(.accessory)
+        appearanceObserver = DarkWindows.observe()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -74,5 +77,26 @@ struct MenuBarLabel: View {
             .filter { $0.freshness(at: store.now, thresholds: store.settings.thresholds) < .stale }
             .map { $0.effectivePct(at: store.now) }
             .max()
+    }
+}
+
+/// The panel paints its own near-black surface, but the frame *around* a popover is
+/// drawn by AppKit in the system's appearance — a pale grey ring around a dark panel on
+/// a light Mac, which `preferredColorScheme` does not reach.
+///
+/// Only the panel's own window is switched. `NSApp.appearance` would take the menu bar
+/// glyph with it, which is drawn in label colours that have to match the *system's*
+/// menu bar, and the settings window stays in the Mac's own appearance because it is an
+/// ordinary settings window and should look like one.
+enum DarkWindows {
+    static func observe() -> Any {
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didUpdateNotification, object: nil, queue: .main
+        ) { note in
+            guard let window = note.object as? NSWindow, window.appearance == nil,
+                  String(describing: type(of: window)).contains("MenuBarExtraWindow")
+            else { return }
+            window.appearance = NSAppearance(named: .darkAqua)
+        }
     }
 }

@@ -20,7 +20,31 @@ All notable changes to Claude Quota Monitor are documented here.
 - `tests/test-bridge.js` — checks over the payload builder and the alarm scheduling, loading
   `bridge.js` and `background.js` themselves rather than copies, so they cannot drift.
 
+### Fixed
+- **Mac panel showed no bars at all** — `ScrollView { … }.frame(maxHeight:)` reports almost no
+  ideal height when asked for one with no proposal, which is exactly what a `MenuBarExtra`
+  window does. The window sized itself to 68pt: header, footer, and every account squeezed out
+  of existence. `fixedSize(horizontal: false, vertical: true)` makes the scroll view report the
+  height its content wants, and the frame still caps it so long lists scroll.
+- **"ตั้งค่า…" did nothing** — `NSApp.sendAction(Selector(("showSettingsWindow:")))` returns
+  `true` on macOS 26 and opens no window in a menu-bar-only app. Replaced with `SettingsLink`.
+- **"เครื่องนี้: 0 tok · 0 ข้อความ"** — Claude Code recomputes `stats-cache.json` lazily, so
+  today's entry is regularly missing on a machine that has been busy since morning. The panel
+  and the settings pane now name the day the cache actually covers and show its figures instead
+  of a zero that reads as "you did nothing".
+
 ### Changed
+- **Two columns.** Accounts sit side by side, so two of them take the height one used to. The
+  panel is only as wide as the columns it shows: one account keeps it narrow.
+- **Per-model weekly caps share one row.** They all reset together and there can be any number
+  of them, so the fullest model gets the bar and the label, the others are marks on the same
+  track plus one small line of figures. `Claude Design` displays as `Design`.
+- **Dark, in Claude's own colours**, whatever the Mac is set to — a translucent light popover
+  picks up whatever wallpaper is behind it. Near-black surface, raised cards, and a warm ramp
+  (sage → gold → terracotta → clay) with Claude's `#D97757` where a bar starts asking for
+  attention. Only the panel's window is switched: the menu bar glyph keeps system colours
+  because it has to match the real menu bar, and the settings window stays a normal Mac window.
+- Reset countdowns lost their wall-clock half to buy the width; it is a tooltip now.
 - `optional_host_permissions: http://127.0.0.1/*`. Optional on purpose: a plain install carries
   no new permission, and Chrome only asks when the bridge is switched on.
 - The badge's binding-limit tracking follows 1.7.2's move to dynamic per-model categories
