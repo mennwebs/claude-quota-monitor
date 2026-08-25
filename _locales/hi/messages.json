@@ -1,4 +1,4 @@
-﻿{
+{
   "ext_name": {
     "message": "Claude कोटा मॉनिटर"
   },
@@ -95,9 +95,6 @@
   "weekly_all_models": {
     "message": "सभी मॉडल"
   },
-  "weekly_design": {
-    "message": "Claude Design"
-  },
   "time_days": {
     "message": "दि"
   },
@@ -134,16 +131,10 @@
   "review_star_title": {
     "message": "Chrome Web Store पर रेट करें"
   },
-  "weekly_sonnet": {
-    "message": "केवल Sonnet"
-  },
   "extra_usage_label": {
     "message": "उपयोग क्रेडिट"
   },
   "extra_usage_limit": {
     "message": "सीमा"
-  },
-  "weekly_opus": {
-    "message": "केवल Opus"
   }
 }

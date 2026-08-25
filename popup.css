@@ -237,25 +237,15 @@ h1 {
 .weekly-row .bar-meta { margin-top: 2px; }
 
 #weekly-pct-text,
-#weekly-sonnet-pct-text,
-#weekly-opus-pct-text,
-#weekly-design-pct-text { font-size: 12px; font-weight: 600; color: var(--weekly-text); }
+.weekly-scoped-pct { font-size: 12px; font-weight: 600; color: var(--weekly-text); }
 #weekly-reset-text,
-#weekly-sonnet-reset-text,
-#weekly-opus-reset-text,
-#weekly-design-reset-text { font-size: 11px; }
+.weekly-scoped-reset { font-size: 11px; }
 
-.bar--sonnet { background: #0e7490; }
-.bar--sonnet.warn { background: #dd6b20; }
-.bar--sonnet.crit { background: #e53e3e; }
-
-.bar--opus { background: #7c3aed; }
-.bar--opus.warn { background: #dd6b20; }
-.bar--opus.crit { background: #e53e3e; }
-
-.bar--design { background: #6366f1; }
-.bar--design.warn { background: #dd6b20; }
-.bar--design.crit { background: #e53e3e; }
+/* Categorias por modelo (dinâmicas): cor base via --bar-base, warn/crit têm
+ * prioridade por especificidade (duas classes vs uma). */
+.bar--scoped { background: var(--bar-base, #6366f1); }
+.bar--scoped.warn { background: #dd6b20; }
+.bar--scoped.crit { background: #e53e3e; }
 
 .bar--extra { background: #b45309; }
 .bar--extra.warn { background: #dd6b20; }

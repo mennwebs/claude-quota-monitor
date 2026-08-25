@@ -1,4 +1,4 @@
-﻿{
+{
   "ext_name": {
     "message": "Claude কোটা মনিটর"
   },
@@ -95,9 +95,6 @@
   "weekly_all_models": {
     "message": "সব মডেল"
   },
-  "weekly_design": {
-    "message": "Claude Design"
-  },
   "time_days": {
     "message": "দি"
   },
@@ -134,16 +131,10 @@
   "review_star_title": {
     "message": "Chrome Web Store-এ রেট করুন"
   },
-  "weekly_sonnet": {
-    "message": "শুধু Sonnet"
-  },
   "extra_usage_label": {
     "message": "ব্যবহার ক্রেডিট"
   },
   "extra_usage_limit": {
     "message": "সীমা"
-  },
-  "weekly_opus": {
-    "message": "শুধু Opus"
   }
 }

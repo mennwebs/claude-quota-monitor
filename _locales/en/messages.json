@@ -1,4 +1,4 @@
-﻿{
+{
   "ext_name": {
     "message": "Claude Quota Monitor"
   },
@@ -95,9 +95,6 @@
   "weekly_all_models": {
     "message": "All models"
   },
-  "weekly_design": {
-    "message": "Claude Design"
-  },
   "time_days": {
     "message": "d"
   },
@@ -134,17 +131,11 @@
   "review_star_title": {
     "message": "Rate on Chrome Web Store"
   },
-  "weekly_sonnet": {
-    "message": "Only Sonnet"
-  },
   "extra_usage_label": {
     "message": "Usage Credits"
   },
   "extra_usage_limit": {
     "message": "limit"
-  },
-  "weekly_opus": {
-    "message": "Only Opus"
   },
   "bridge_title": {
     "message": "Mac menu bar bridge"

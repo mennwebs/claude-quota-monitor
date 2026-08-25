@@ -15,14 +15,41 @@ All notable changes to Claude Quota Monitor are documented here.
   app is current within a minute of launching while request volume to claude.ai is unchanged.
 - The app can ask for a real refresh in its reply to a push — the only path from the Mac back
   into the browser.
-- `tests/test-bridge.js` — 23 checks over the payload builder, loaded from `bridge.js` itself
-  rather than copied, so it cannot drift from what ships.
+- `mac/` — the menu bar app itself, in this repo because the two halves share the wire contract
+  in `docs/protocol.md`.
+- `tests/test-bridge.js` — checks over the payload builder and the alarm scheduling, loading
+  `bridge.js` and `background.js` themselves rather than copies, so they cannot drift.
 
 ### Changed
 - `optional_host_permissions: http://127.0.0.1/*`. Optional on purpose: a plain install carries
   no new permission, and Chrome only asks when the bridge is switched on.
-- README's permission table no longer lists `tabs`, which was dropped in 5edcd50.
+- The badge's binding-limit tracking follows 1.7.2's move to dynamic per-model categories
+  instead of naming Opus, so a new model is picked up without a code change.
 
+
+## [1.7.3] — 2026-07-31
+
+### Fixed
+- **Removed unnecessary `tabs` permission** — the Chrome Web Store flagged the `tabs` permission as excessive (policy "Purple Potassium"). The extension only uses `chrome.tabs.create({ url })`, which does not require the `tabs` permission (that permission is only needed to read sensitive tab properties like url/title of existing tabs). Removing it resolves the compliance warning with no loss of functionality.
+
+---
+
+## [1.7.2] — 2026-07-23
+
+### Added
+- **Fable weekly quota** — the new Fable model now appears as a weekly category
+- **Dynamic per-model categories** — weekly model breakdowns are now rendered dynamically from the API's new `limits` array, so any current or future model (Fable, Sonnet, Opus, Design, ...) shows up automatically with the name and reset time the API provides
+
+### Fixed
+- **Per-model bars broken by API change** — the API moved per-model quota from individual `seven_day_*` fields (now returning null) to a structured `limits` array with `weekly_scoped` entries; the extension now reads the new format, with a fallback to the legacy fields
+- **Wrong organization selected on multi-org accounts** — accounts with a separate API organization could have the extension pick the wrong org (`orgs[0]`); it now prefers the organization with the `chat` capability
+- **BOM in locale files** — messages.json files written during 1.7/1.7.1 packaging contained a UTF-8 BOM; removed for clean JSON parsing
+
+### Changed
+- `setBar()` simplified to preserve any `bar--*` color modifier generically instead of a hardcoded list
+- Removed now-unused locale keys `weekly_sonnet`, `weekly_opus`, `weekly_design` (per-model labels come from the API's `display_name`)
+
+---
 
 ## [1.7.1] — 2026-06-03
 

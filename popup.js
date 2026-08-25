@@ -86,19 +86,28 @@ setInterval(tickLastUpdate, 1000);
 /* ── Barra de progresso ── */
 function setBar(barEl, pct) {
   barEl.style.width = `${pct}%`;
-  // Preserva todos os modificadores antes de reconstruir o className
-  const sm     = barEl.classList.contains('bar--sm');
-  const sonnet = barEl.classList.contains('bar--sonnet');
-  const opus   = barEl.classList.contains('bar--opus');
-  const design = barEl.classList.contains('bar--design');
-  const extra  = barEl.classList.contains('bar--extra');
-  barEl.className = 'bar'
-    + (sm     ? ' bar--sm'     : '')
-    + (sonnet ? ' bar--sonnet' : '')
-    + (opus   ? ' bar--opus'   : '')
-    + (design ? ' bar--design' : '')
-    + (extra  ? ' bar--extra'  : '')
-    + (pct >= 90 ? ' crit' : pct >= 70 ? ' warn' : '');
+  // Preserva todos os modificadores bar--* e reaplica warn/crit conforme o %
+  const modifiers = Array.from(barEl.classList).filter(c => c.startsWith('bar--'));
+  barEl.className = ['bar', ...modifiers,
+    (pct >= 90 ? 'crit' : pct >= 70 ? 'warn' : '')].filter(Boolean).join(' ');
+}
+
+/* Cor base de cada categoria por modelo. Nomes conhecidos têm cor fixa; os
+ * demais recebem uma cor estável derivada do nome. */
+function scopedColor(name) {
+  const key = (name || '').toLowerCase();
+  const known = {
+    fable:  '#2563eb',
+    sonnet: '#0e7490',
+    opus:   '#7c3aed',
+    design: '#6366f1',
+    haiku:  '#059669',
+  };
+  for (const k in known) if (key.includes(k)) return known[k];
+  const palette = ['#6366f1', '#0e7490', '#7c3aed', '#b45309', '#059669', '#db2777'];
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+  return palette[Math.abs(h) % palette.length];
 }
 
 /* ── Formatação monetária ── */
@@ -139,6 +148,46 @@ function formatPlan(raw) {
   return map[key] ?? raw.toString().split(/[\s_-]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
+/* ── Categorias semanais por modelo (dinâmicas) ── */
+function renderScopedCategories(scoped) {
+  const container = document.getElementById('weekly-scoped-container');
+  container.textContent = ''; // limpa antes de reconstruir
+  scoped.forEach(cat => {
+    const pct = Math.min(100, Math.max(0, cat.percent ?? 0));
+
+    const wrap = document.createElement('div');
+    wrap.className = 'weekly-category';
+
+    const divider = document.createElement('div');
+    divider.className = 'weekly-cat-divider';
+
+    const label = document.createElement('div');
+    label.className = 'weekly-cat-label';
+    label.textContent = cat.name;
+
+    const barWrap = document.createElement('div');
+    barWrap.className = 'bar-wrapper bar-wrapper--sm';
+    const bar = document.createElement('div');
+    bar.className = 'bar bar--sm bar--scoped';
+    bar.style.setProperty('--bar-base', scopedColor(cat.name));
+    barWrap.appendChild(bar);
+
+    const meta = document.createElement('div');
+    meta.className = 'bar-meta';
+    const pctSpan = document.createElement('span');
+    pctSpan.className = 'weekly-scoped-pct';
+    pctSpan.textContent = `${pct}% ${t('used_suffix')}`;
+    const resetSpan = document.createElement('span');
+    resetSpan.className = 'muted weekly-scoped-reset';
+    resetSpan.textContent = cat.resetAt ? `${t('resets_in')} ${fmtReset(cat.resetAt)}` : '';
+    meta.append(pctSpan, resetSpan);
+
+    wrap.append(divider, label, barWrap, meta);
+    container.appendChild(wrap);
+    setBar(bar, pct); // aplica largura + warn/crit
+  });
+}
+
 /* ── Renderização ── */
 function render(u) {
   const hasData = u?.percent !== undefined;
@@ -166,44 +215,8 @@ function render(u) {
     document.getElementById('weekly-reset-text').textContent =
       `${t('resets_in')} ${fmtReset(u.weeklyResetAt)}`;
 
-    // Apenas Sonnet
-    const sonnetCat = document.getElementById('sonnet-category');
-    if (u.sonnetWeeklyPercent !== undefined) {
-      sonnetCat.classList.remove('hidden');
-      const sp = Math.min(100, Math.max(0, u.sonnetWeeklyPercent));
-      setBar(document.getElementById('bar-weekly-sonnet'), sp);
-      document.getElementById('weekly-sonnet-pct-text').textContent = `${sp}% ${t('used_suffix')}`;
-      document.getElementById('weekly-sonnet-reset-text').textContent =
-        `${t('resets_in')} ${fmtReset(u.sonnetWeeklyResetAt)}`;
-    } else {
-      sonnetCat.classList.add('hidden');
-    }
-
-    // Claude Opus
-    const opusCat = document.getElementById('opus-category');
-    if (u.opusWeeklyPercent !== undefined) {
-      opusCat.classList.remove('hidden');
-      const op = Math.min(100, Math.max(0, u.opusWeeklyPercent));
-      setBar(document.getElementById('bar-weekly-opus'), op);
-      document.getElementById('weekly-opus-pct-text').textContent = `${op}% ${t('used_suffix')}`;
-      document.getElementById('weekly-opus-reset-text').textContent =
-        `${t('resets_in')} ${fmtReset(u.opusWeeklyResetAt)}`;
-    } else {
-      opusCat.classList.add('hidden');
-    }
-
-    // Claude Design
-    const designCat = document.getElementById('design-category');
-    if (u.designWeeklyPercent !== undefined) {
-      designCat.classList.remove('hidden');
-      const dp = Math.min(100, Math.max(0, u.designWeeklyPercent));
-      setBar(document.getElementById('bar-weekly-design'), dp);
-      document.getElementById('weekly-design-pct-text').textContent = `${dp}% ${t('used_suffix')}`;
-      document.getElementById('weekly-design-reset-text').textContent =
-        `${t('resets_in')} ${fmtReset(u.designWeeklyResetAt)}`;
-    } else {
-      designCat.classList.add('hidden');
-    }
+    // Categorias por modelo (dinâmicas)
+    renderScopedCategories(u.weeklyScoped || []);
   } else {
     weeklyRow.classList.add('hidden');
   }
