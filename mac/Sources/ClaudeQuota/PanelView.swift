@@ -395,14 +395,13 @@ private struct PctText: View {
     }
 }
 
-/// The right-hand column answers "how long have I got", and which number that is
-/// depends on what runs out first.
+/// The right-hand column always counts down to the reset. That is the number anyone
+/// acts on, and swapping it for a second duration cost more than it bought: two
+/// countdowns in one column, minutes apart and meaning different things, is a puzzle
+/// rather than a warning.
 ///
-/// Normally it is the reset: the window refills then and the countdown is what anyone
-/// acts on. But a window being spent faster than it can carry runs out *before* it
-/// resets, and then the reset time is the wrong number to be showing — it reads as
-/// reassurance. When that is the case the column switches to the moment the quota
-/// actually ends, and the reset moves into the tooltip.
+/// So a window heading for trouble keeps its countdown and turns red, and the reason
+/// waits in the tooltip. Colour asks the question; hovering answers it.
 ///
 /// After a reset the next one is not knowable at all: the 5-hour window starts on the
 /// next message, not on a schedule. Say so rather than invent a countdown.
@@ -412,45 +411,33 @@ private struct ResetText: View {
     let now: Date
     var pace: Pace?
 
-    /// Only a predicted shortfall takes the column. Merely being near the line is what
-    /// the mark on the bar is for — swapping the number back and forth around 100%
-    /// would make the row unreadable.
-    private var shortfall: TimeInterval? {
-        guard !expired, pace?.level == .short else { return nil }
-        return pace?.exhaustsIn
+    /// True when this window is on course to run out before it resets. `exhaustsIn` is
+    /// the gate rather than the level alone: it is nil for a window already at 100%,
+    /// which has nothing left to run out of and should keep reading as merely full.
+    private var willRunOut: Bool {
+        !expired && pace?.level == .short && pace?.exhaustsIn != nil
     }
 
     var body: some View {
         Text(text)
             .font(.system(size: 9))
             .monospacedDigit()
-            // Terracotta, not the red the bar uses at 90%: this is a projection, and it
-            // should not read as loudly as a window that is actually full.
-            .foregroundStyle(shortfall == nil ? Theme.inkFaint : Theme.brand)
+            .foregroundStyle(willRunOut ? Theme.color(for: 100) : Theme.inkFaint)
             .lineLimit(1)
             .frame(width: RowMetric.trailing, alignment: .trailing)
             .help(tooltip)
     }
 
     private var text: String {
-        if let shortfall { return "\(Image(systemName: "exclamationmark.triangle.fill")) \(Fmt.brief(shortfall))" }
         guard let resets else { return "" }
         return expired ? "รีเซ็ตแล้ว" : "↻ \(Fmt.countdown(to: resets, from: now))"
     }
 
     private var tooltip: String {
-        if let shortfall, let pace, let resets {
-            return "ใช้ไปเร็วกว่าที่งวดนี้จะรับไหว ผ่านมา \(Int(pace.elapsed * 100))% ของงวด "
-                 + "ไปต่อจังหวะนี้จะเต็มในอีก \(Fmt.brief(shortfall)) ทั้งที่กว่าจะรีเซ็ตคือ "
-                 + "\(Fmt.countdown(to: resets, from: now)) ข้างหน้า"
-        }
         guard let resets else { return "" }
         if expired { return "รีเซ็ตแล้ว · รอใช้ครั้งถัดไป" }
-        if let pace {
-            return "รีเซ็ต \(Fmt.clock(resets, now: now)) · ผ่านมา \(Int(pace.elapsed * 100))% ของงวด "
-                 + "ไปต่อจังหวะนี้จบงวดที่ \(Int(pace.projected.rounded()))%"
-        }
-        return "รีเซ็ต \(Fmt.clock(resets, now: now))"
+        let reset = "รีเซ็ต \(Fmt.clock(resets, now: now))"
+        return willRunOut ? "อาจติดลิมิตก่อนกำหนด · \(reset)" : reset
     }
 }
 

@@ -167,15 +167,6 @@ enum Fmt {
         return "\(h / 24) วันที่แล้ว"
     }
 
-    /// Coarsest useful form: one unit, nothing after it. The trailing column is 54pt
-    /// wide and already carries a countdown; a second one has to be smaller than it.
-    static func brief(_ seconds: TimeInterval) -> String {
-        let s = max(0, Int(seconds))
-        if s >= 86_400 { return "\(s / 86_400)d" }
-        if s >= 3600 { return "\(s / 3600)h" }
-        return "\(s / 60)m"
-    }
-
     /// Bare duration: "41 นาที", "2 ชม.", "3 วัน".
     static func gap(_ seconds: TimeInterval) -> String {
         let m = max(0, Int(seconds) / 60)

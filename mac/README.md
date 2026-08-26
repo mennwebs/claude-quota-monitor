@@ -86,7 +86,7 @@ Opus figure quietly goes hours old. Each row is dimmed on its own clock.
 | Never reported | hollow outline, not `0%` |
 | Nothing reporting for 5 min | hollow gold dot, "เงียบ 41 นาที" on the row and in the header |
 | A source silent for 3 hours | its badge (`CLI`, `Dia`, …) disappears until it reports again |
-| Spending the window faster than it can carry | a notch on the bar at the even-pace mark; past 110% projected, the countdown becomes the moment it runs out |
+| Spending the window faster than it can carry | a notch on the bar at the even-pace mark; past 110% projected, the reset countdown turns red |
 
 That last row is a different claim from the ones above it, and the panel used to be unable to
 make it. "This number is 40 minutes old" and "nothing has reported for 40 minutes" look
@@ -113,8 +113,12 @@ So each bar carries a notch where the fill would be if the window were being spe
 makes the comparison without a number. It is drawn as a gap in the track rather than as ink,
 because it is a mark on the ruler and not another reading.
 
-When the projection passes 110% the right-hand column stops counting down to the reset and counts
-down to the moment the quota actually ends, in terracotta. The reset time moves into the tooltip.
+When the projection passes 110% the right-hand column turns red. It keeps counting down to the
+reset — that is still the number anyone acts on, and a second duration in the same column, minutes
+apart from the first and meaning something else, is a puzzle rather than a warning. The reason
+waits in the tooltip: *อาจติดลิมิตก่อนกำหนด*, then the reset time as before. Colour asks the
+question, hovering answers it.
+
 Ten percent of slack either side of 100 is deliberate: a session at 62% with 58% of it gone
 projects to 107%, which is a rounding error wearing an alarm's clothes.
 

@@ -333,7 +333,6 @@ enum SelfTest {
             check("projects to more than double the window", p.projected > 263 && p.projected < 265)
             let hours = (p.exhaustsIn ?? 0) / 3600
             check("and runs out in about 21 hours", hours > 21.4 && hours < 21.8)
-            check("which the column has room for", Fmt.brief(p.exhaustsIn ?? 0) == "21h")
         } else { failed += 1; print("  ✗  an over-pace weekly limit produced no pace") }
 
         // Under pace: most of the window gone, less than half of it spent.
