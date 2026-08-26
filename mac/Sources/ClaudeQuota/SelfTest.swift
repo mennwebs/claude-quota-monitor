@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Checks on `JSONTextPatch`, the one piece that edits a file the user owns and
 /// hand-maintains. Run with `--selftest`.
@@ -307,6 +308,81 @@ enum SelfTest {
                                       receivedAt: t0))
         check("the badge is stamped with the reading, not with the delivery",
               stamped.sourceBadges(rowLabel: "x", at: t0).isEmpty)
+
+        print("\n▸ Pace — spending a window faster than it can carry")
+        let week: TimeInterval = 7 * 86_400
+        func weekly(_ pct: Double, leftInWindow: TimeInterval, at when: Date) -> LimitReading {
+            LimitReading(pct: pct, resetsAt: when.addingTimeInterval(leftInWindow),
+                         observedAt: when, source: .ext, label: nil)
+        }
+
+        // The Seed card as it stood: a quarter into the week, over a quarter spent.
+        if let p = weekly(27, leftInWindow: 5 * 86_400 + 8 * 3600, at: t0)
+                     .pace(id: LimitID.sevenDay, at: t0) {
+            check("elapsed is read from the reset time and the window length",
+                  abs(p.elapsed - 144_000 / week) < 0.001)
+            check("projected end of window", p.projected > 113 && p.projected < 114)
+            check("and it is called short", p.level == .short)
+            check("with the moment it runs out", (p.exhaustsIn ?? 0) > 0)
+        } else { failed += 1; print("  ✗  a mid-window weekly limit produced no pace") }
+
+        // Novem's: two days in, two thirds gone.
+        if let p = weekly(66, leftInWindow: 5 * 86_400 + 6 * 3600, at: t0)
+                     .pace(id: LimitID.sevenDay, at: t0) {
+            check("a quarter of the week elapsed", abs(p.elapsed - 0.25) < 0.001)
+            check("projects to more than double the window", p.projected > 263 && p.projected < 265)
+            let hours = (p.exhaustsIn ?? 0) / 3600
+            check("and runs out in about 21 hours", hours > 21.4 && hours < 21.8)
+            check("which the column has room for", Fmt.brief(p.exhaustsIn ?? 0) == "21h")
+        } else { failed += 1; print("  ✗  an over-pace weekly limit produced no pace") }
+
+        // Under pace: most of the window gone, less than half of it spent.
+        if let p = weekly(30, leftInWindow: 5_580, at: t0).pace(id: LimitID.fiveHour, at: t0) {
+            check("a window being spent slowly is on track", p.level == .onTrack)
+            check("and names no end", p.exhaustsIn == nil)
+        } else { failed += 1; print("  ✗  an under-pace session produced no pace") }
+
+        check("the band around 100 does not flicker", [
+            (89.0, Pace.Level.onTrack), (90.0, .tight), (110.0, .tight), (111.0, .short)
+        ].allSatisfy { Pace(elapsed: 0.5, projected: $0.0, exhaustsIn: nil).level == $0.1 })
+        // 62% used with 58% of the session gone: a 7% overshoot, not an alarm.
+        check("a marginal overshoot stays inside the band",
+              Pace(elapsed: 0.58, projected: 107, exhaustsIn: 3600).level == .tight)
+
+        // A full window keeps its reset countdown instead of being told it runs out now.
+        if let p = weekly(100, leftInWindow: 2 * 3600, at: t0).pace(id: LimitID.fiveHour, at: t0) {
+            check("a window already spent predicts no end", p.exhaustsIn == nil)
+        } else { failed += 1; print("  ✗  a full window produced no pace at all") }
+
+        // Everything that has to answer "cannot say" rather than guess.
+        check("a per-model cap has no reset time, so no pace",
+              LimitReading(pct: 40, resetsAt: nil, observedAt: t0, source: .ext, label: "Fable")
+                  .pace(id: "weekly:fable", at: t0) == nil)
+        check("nor does a window that has already run out",
+              weekly(40, leftInWindow: -60, at: t0).pace(id: LimitID.sevenDay, at: t0) == nil)
+        // The 5-hour window starts on your first message, so its opening minutes are
+        // always over pace and always meaningless.
+        check("nor one that is 40 minutes old",
+              LimitReading(pct: 5, resetsAt: t0.addingTimeInterval(4 * 3600 + 20 * 60),
+                           observedAt: t0, source: .ext, label: nil)
+                  .pace(id: LimitID.fiveHour, at: t0) == nil)
+        check("but 46 minutes in it can be read",
+              LimitReading(pct: 5, resetsAt: t0.addingTimeInterval(4 * 3600 + 14 * 60),
+                           observedAt: t0, source: .ext, label: nil)
+                  .pace(id: LimitID.fiveHour, at: t0) != nil)
+        check("an unused window projects to nothing, not to a division by zero",
+              weekly(0, leftInWindow: 3 * 86_400, at: t0)
+                  .pace(id: LimitID.sevenDay, at: t0)?.projected == 0)
+
+        print("\n▸ Theme — the same number must read the same in both surfaces")
+        // The extension's badge and popup both break at 70 and 90. This panel breaking
+        // at 80 and 95 meant 76% came up gold here and orange there.
+        check("76% is the extension's orange, not gold", Theme.color(for: 76) == Theme.brand)
+        check("70 is where that starts", Theme.color(for: 70) == Theme.brand)
+        check("69 is still the step below", Theme.color(for: 69) == Theme.warning)
+        check("90 is red, as it is in the badge", Theme.color(for: 90) == Theme.color(for: 100))
+        check("89 is not", Theme.color(for: 89) == Theme.brand)
+        check("and the panel keeps its own half-way step", Theme.color(for: 49) != Theme.warning)
 
         print("\n▸ Persistence — a file from an earlier build must survive")
         // `AppSettings.load()` answers a failed decode with defaults, and Swift's

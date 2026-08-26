@@ -307,14 +307,16 @@ struct LimitRow: View {
     /// This reading's own age. An account can be reporting every second and still be
     /// showing an Opus figure from three hours ago.
     private var freshness: Freshness { reading.freshness(at: now, thresholds: thresholds) }
+    private var pace: Pace? { reading.pace(id: limit.id, at: now) }
 
     var body: some View {
         HStack(spacing: RowMetric.gap) {
             RowLabel(limit.short)
-            QuotaBar(pct: pct, freshness: freshness, hollow: expired)
+            QuotaBar(pct: pct, freshness: freshness, hollow: expired,
+                     par: pace.map { $0.elapsed * 100 })
                 .frame(height: Theme.barHeight)
             PctText(pct: pct, expired: expired, freshness: freshness)
-            ResetText(resets: reading.resetsAt, expired: expired, now: now)
+            ResetText(resets: reading.resetsAt, expired: expired, now: now, pace: pace)
         }
     }
 }
@@ -334,6 +336,8 @@ struct ModelGroupRow: View {
     private var rest: [Limit] { Array(limits.dropFirst()) }
     private var expired: Bool { top.reading.expired(at: now) }
     private var freshness: Freshness { top.reading.freshness(at: now, thresholds: thresholds) }
+    // nil in practice today: the API sends no `resets_at` for per-model caps.
+    private var pace: Pace? { top.reading.pace(id: top.id, at: now) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -342,10 +346,11 @@ struct ModelGroupRow: View {
                 QuotaBar(pct: top.reading.effectivePct(at: now),
                          freshness: freshness,
                          hollow: expired,
-                         ticks: rest.map { $0.reading.effectivePct(at: now) })
+                         ticks: rest.map { $0.reading.effectivePct(at: now) },
+                         par: pace.map { $0.elapsed * 100 })
                     .frame(height: Theme.barHeight)
                 PctText(pct: top.reading.effectivePct(at: now), expired: expired, freshness: freshness)
-                ResetText(resets: top.reading.resetsAt, expired: expired, now: now)
+                ResetText(resets: top.reading.resetsAt, expired: expired, now: now, pace: pace)
             }
 
             if !rest.isEmpty {
@@ -390,32 +395,62 @@ private struct PctText: View {
     }
 }
 
-/// After a reset the next one is not knowable: the 5-hour window starts on the next
-/// message, not on a schedule. Say that instead of inventing a countdown. The exact
-/// wall-clock time is a tooltip — the countdown is what anyone acts on.
+/// The right-hand column answers "how long have I got", and which number that is
+/// depends on what runs out first.
+///
+/// Normally it is the reset: the window refills then and the countdown is what anyone
+/// acts on. But a window being spent faster than it can carry runs out *before* it
+/// resets, and then the reset time is the wrong number to be showing — it reads as
+/// reassurance. When that is the case the column switches to the moment the quota
+/// actually ends, and the reset moves into the tooltip.
+///
+/// After a reset the next one is not knowable at all: the 5-hour window starts on the
+/// next message, not on a schedule. Say so rather than invent a countdown.
 private struct ResetText: View {
     let resets: Date?
     let expired: Bool
     let now: Date
+    var pace: Pace?
+
+    /// Only a predicted shortfall takes the column. Merely being near the line is what
+    /// the mark on the bar is for — swapping the number back and forth around 100%
+    /// would make the row unreadable.
+    private var shortfall: TimeInterval? {
+        guard !expired, pace?.level == .short else { return nil }
+        return pace?.exhaustsIn
+    }
 
     var body: some View {
         Text(text)
             .font(.system(size: 9))
             .monospacedDigit()
-            .foregroundStyle(Theme.inkFaint)
+            // Terracotta, not the red the bar uses at 90%: this is a projection, and it
+            // should not read as loudly as a window that is actually full.
+            .foregroundStyle(shortfall == nil ? Theme.inkFaint : Theme.brand)
             .lineLimit(1)
             .frame(width: RowMetric.trailing, alignment: .trailing)
             .help(tooltip)
     }
 
     private var text: String {
+        if let shortfall { return "\(Image(systemName: "exclamationmark.triangle.fill")) \(Fmt.brief(shortfall))" }
         guard let resets else { return "" }
         return expired ? "รีเซ็ตแล้ว" : "↻ \(Fmt.countdown(to: resets, from: now))"
     }
 
     private var tooltip: String {
+        if let shortfall, let pace, let resets {
+            return "ใช้ไปเร็วกว่าที่งวดนี้จะรับไหว ผ่านมา \(Int(pace.elapsed * 100))% ของงวด "
+                 + "ไปต่อจังหวะนี้จะเต็มในอีก \(Fmt.brief(shortfall)) ทั้งที่กว่าจะรีเซ็ตคือ "
+                 + "\(Fmt.countdown(to: resets, from: now)) ข้างหน้า"
+        }
         guard let resets else { return "" }
-        return expired ? "รีเซ็ตแล้ว · รอใช้ครั้งถัดไป" : "รีเซ็ต \(Fmt.clock(resets, now: now))"
+        if expired { return "รีเซ็ตแล้ว · รอใช้ครั้งถัดไป" }
+        if let pace {
+            return "รีเซ็ต \(Fmt.clock(resets, now: now)) · ผ่านมา \(Int(pace.elapsed * 100))% ของงวด "
+                 + "ไปต่อจังหวะนี้จบงวดที่ \(Int(pace.projected.rounded()))%"
+        }
+        return "รีเซ็ต \(Fmt.clock(resets, now: now))"
     }
 }
 
@@ -425,6 +460,10 @@ struct QuotaBar: View {
     var hollow: Bool = false
     /// Other readings sharing this track, drawn as marks rather than as their own row.
     var ticks: [Double] = []
+    /// Where the fill would be if this window were being spent evenly, 0…100. Drawn as
+    /// a notch rather than as ink: it is a mark on the ruler, not another reading, and
+    /// the only comparison that matters is which side of it the fill is on.
+    var par: Double?
 
     var body: some View {
         GeometryReader { geo in
@@ -445,6 +484,15 @@ struct QuotaBar: View {
                             .frame(width: 2)
                             .offset(x: max(0, min(geo.size.width - 2,
                                                   geo.size.width * tick / 100 - 1)))
+                    }
+                    // Cut in the card's own colour so it reads as a gap in the track
+                    // rather than as a third value competing with the fill.
+                    if let par, par > 0, par < 100 {
+                        Rectangle()
+                            .fill(Theme.card)
+                            .frame(width: 1.5)
+                            .offset(x: max(0, min(geo.size.width - 1.5,
+                                                  geo.size.width * par / 100 - 0.75)))
                     }
                 }
             }

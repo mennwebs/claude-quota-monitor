@@ -74,6 +74,13 @@ private struct GeneralSettings: View {
                 }
             }
 
+            Section("จังหวะการใช้") {
+                Text("ทุกแท่งมีรอยบากตรงตำแหน่งที่ควรอยู่ถ้าใช้เฉลี่ยทั้งงวด อยู่ซ้ายรอยคือยังไหว อยู่ขวาคือเร็วกว่างวดจะรับได้ ถ้าคาดว่าจะเต็มก่อนรีเซ็ตจริง ช่องขวาจะเปลี่ยนจากเวลารีเซ็ตเป็นเวลาที่จะเต็ม")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("cap รายโมเดลยังคิดให้ไม่ได้ เพราะ API ส่ง resets_at มาเป็น null")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("ถือว่าค่าเก่าเมื่อ") {
                 MinuteStepper(title: "เริ่มจาง", seconds: $store.settings.thresholds.fresh, range: 1...60)
                 MinuteStepper(title: "จางลงอีก", seconds: $store.settings.thresholds.aging, range: 5...240)

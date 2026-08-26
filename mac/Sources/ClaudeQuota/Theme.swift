@@ -26,13 +26,19 @@ enum Theme {
 
     // MARK: - Quota ramp
 
-    /// Thresholds match the ones already in use in this machine's `statusline.sh`
-    /// (50 / 80), plus a final band at 95 for "about to stop working".
+    /// The two boundaries that matter are the extension's — 70 and 90 — because the
+    /// same percentage is read in both surfaces of the same product, and 76% coming up
+    /// gold here while the popup drew it orange is the app contradicting itself.
+    ///
+    /// The extra step at 50 is this panel's own: bars sit side by side here, so "half
+    /// way" is worth seeing at a glance. It is a finer reading of the extension's green
+    /// band, not a disagreement with it. (`statusline.sh` on this machine still uses
+    /// 50/80 and is not ours to change.)
     static func color(for pct: Double) -> Color {
         switch pct {
         case ..<50:  return hex(0x7FA98A)   // sage
-        case ..<80:  return warning         // gold
-        case ..<95:  return brand           // terracotta
+        case ..<70:  return warning         // gold
+        case ..<90:  return brand           // terracotta
         default:     return hex(0xD2453B)   // clay red
         }
     }
@@ -43,8 +49,8 @@ enum Theme {
     static func nsColor(for pct: Double) -> NSColor {
         switch pct {
         case ..<50:  return .systemGreen
-        case ..<80:  return .systemYellow
-        case ..<95:  return .systemOrange
+        case ..<70:  return .systemYellow
+        case ..<90:  return .systemOrange
         default:     return .systemRed
         }
     }

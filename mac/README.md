@@ -86,6 +86,7 @@ Opus figure quietly goes hours old. Each row is dimmed on its own clock.
 | Never reported | hollow outline, not `0%` |
 | Nothing reporting for 5 min | hollow gold dot, "เงียบ 41 นาที" on the row and in the header |
 | A source silent for 3 hours | its badge (`CLI`, `Dia`, …) disappears until it reports again |
+| Spending the window faster than it can carry | a notch on the bar at the even-pace mark; past 110% projected, the countdown becomes the moment it runs out |
 
 That last row is a different claim from the ones above it, and the panel used to be unable to
 make it. "This number is 40 minutes old" and "nothing has reported for 40 minutes" look
@@ -100,6 +101,45 @@ single short report cannot erase a figure that is still live.
 
 After a 5-hour window resets, the next reset time is genuinely unknowable — the window starts
 on your next message, not on a schedule. It says so instead of inventing a countdown.
+
+### Pace
+
+A bar answers "how full", which is not the question that ruins a week. 66% used looks comfortable
+next to a reset five days out, and is not: a quarter of the way into the window, that is a quota
+gone by Thursday.
+
+So each bar carries a notch where the fill would be if the window were being spent evenly —
+`(window − time left) / window`. Left of the notch is ahead, right of it is behind, and the eye
+makes the comparison without a number. It is drawn as a gap in the track rather than as ink,
+because it is a mark on the ruler and not another reading.
+
+When the projection passes 110% the right-hand column stops counting down to the reset and counts
+down to the moment the quota actually ends, in terracotta. The reset time moves into the tooltip.
+Ten percent of slack either side of 100 is deliberate: a session at 62% with 58% of it gone
+projects to 107%, which is a rounding error wearing an alarm's clothes.
+
+Pace is refused rather than guessed in four cases: no window length, no `resets_at` (which is
+every per-model cap today — the API sends null), a window already past its reset, and a window
+less than 15% elapsed. That last one matters most. The 5-hour window starts on your first message
+rather than on a schedule, so one message two minutes in projects to several hundred percent and
+means nothing at all.
+
+The projection is a flat average from the start of the window. It cannot know that you work
+Monday to Friday, so a weekly limit will read over-pace on a Friday and then flatten out. A slope
+taken from the last few readings would handle that, and would need a history this app does not
+keep yet.
+
+### Colour
+
+The two boundaries that matter are the extension's, 70 and 90, because the same percentage is
+read in both surfaces of the same product and 76% coming up gold in the panel while the popup
+drew it orange is the app contradicting itself. The extra step at 50 is the panel's own: bars sit
+side by side here, so "half way" is worth seeing at a glance. `statusline.sh` on this machine
+still breaks at 50/80 and is not ours to change.
+
+Colour never reads pace. A bar is coloured by how full it is and nothing else — otherwise a
+window at 92% would go green for being nearly over, which is the one direction this must never
+move. Pace speaks through the notch and the countdown instead.
 
 Source badges expire. They claim a source is feeding the row, so a `CLI` flag that could only
 ever be switched on kept asserting a status line that had not run since yesterday. Each source

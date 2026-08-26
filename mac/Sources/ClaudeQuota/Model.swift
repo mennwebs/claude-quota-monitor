@@ -24,6 +24,14 @@ enum LimitID {
         return slug.allSatisfy { ($0.isLetter && $0.isLowercase) || $0.isNumber || $0 == "-" }
     }
 
+    /// How long each window runs. The API states when a window resets but never how
+    /// long it is, and pace cannot say how far in you are without it.
+    static func windowLength(_ raw: String) -> TimeInterval? {
+        if raw == fiveHour { return 5 * 3600 }
+        if raw == sevenDay || raw.hasPrefix(weeklyPrefix) { return 7 * 86_400 }
+        return nil
+    }
+
     /// Extension builds before the dynamic-limits change still send these.
     static let legacyAliases: [String: (id: String, label: String)] = [
         "seven_day_opus":   (weeklyPrefix + "opus", "Opus"),
@@ -92,6 +100,34 @@ struct LimitReading: Codable, Equatable, Sendable {
 
     func effectivePct(at now: Date) -> Double { expired(at: now) ? 0 : pct }
 
+    /// How much of the window has to have passed before pace means anything.
+    ///
+    /// The 5-hour window starts on your first message rather than on a schedule, so its
+    /// opening minutes are *always* over pace: one message two minutes in projects to
+    /// several hundred percent and says nothing at all. Fifteen percent of a 5-hour
+    /// window is 45 minutes, which is long enough for a rate to exist.
+    static let paceWarmup = 0.15
+
+    /// nil when pace cannot be judged: the window is unknown, has no reset time (which
+    /// is every per-model cap today — the API sends `resets_at: null` for them), has
+    /// already run out, or is too young to read.
+    func pace(id: String, at now: Date) -> Pace? {
+        guard let window = LimitID.windowLength(id), let resets = resetsAt else { return nil }
+        let left = resets.timeIntervalSince(now)
+        guard left > 0 else { return nil }
+        let elapsed = (window - left) / window
+        guard elapsed >= Self.paceWarmup, elapsed < 1 else { return nil }
+
+        guard pct > 0 else { return Pace(elapsed: elapsed, projected: 0, exhaustsIn: nil) }
+        let projected = pct / elapsed
+        let perSecond = pct / (window * elapsed)
+        // A window already spent has no end left to predict. Saying "runs out in 0m" over
+        // a bar that is visibly full is noise, and it costs the row its reset countdown —
+        // which at that point is the only number left worth having.
+        let ends = projected > 100 && pct < 100 ? (100 - pct) / perSecond : nil
+        return Pace(elapsed: elapsed, projected: projected, exhaustsIn: ends)
+    }
+
     /// Each limit ages on its own clock. The two sources cover different limits — the
     /// status line never reports Opus — so an account can be refreshed every second
     /// while its Opus number quietly goes hours stale. Dimming the row by the account's
@@ -99,6 +135,37 @@ struct LimitReading: Codable, Equatable, Sendable {
     func freshness(at now: Date, thresholds: FreshnessThresholds) -> Freshness {
         Freshness.of(now.timeIntervalSince(observedAt), thresholds: thresholds)
     }
+}
+
+// MARK: - Pace
+
+/// Whether this window is being spent faster than it can carry.
+///
+/// A bar answers "how full", which is not the question that ruins a week. 66% used
+/// looks comfortable next to a reset five days out, and is not: a quarter of the way
+/// into the window it means the quota runs out on Thursday. The comparison the eye
+/// cannot make on its own is usage against *elapsed time*, so the panel makes it.
+struct Pace: Equatable, Sendable {
+    /// How far through the window we are, 0…1. This is where the bar would be if the
+    /// window were being spent evenly — the mark the fill is measured against.
+    var elapsed: Double
+    /// Where the fill lands at the end of the window if the current average rate holds.
+    var projected: Double
+    /// Time until the window is spent, or nil when it will not be spent at this rate.
+    var exhaustsIn: TimeInterval?
+
+    /// Ten percent either side of 100. Anything inside that is a window being spent at
+    /// roughly the rate it can carry, and the projection is not accurate enough to argue
+    /// otherwise: a session at 62% with 58% of it gone projects to 107%, which is a 7%
+    /// overshoot dressed up as an hour of lost quota. The mark on the bar can say that
+    /// much on its own.
+    var level: Level {
+        if projected > 110 { return .short }
+        if projected >= 90 { return .tight }
+        return .onTrack
+    }
+
+    enum Level: Sendable { case onTrack, tight, short }
 }
 
 // MARK: - Freshness
