@@ -1,4 +1,5 @@
 import Foundation
+import ServiceManagement
 
 // MARK: - Paths
 
@@ -226,5 +227,38 @@ enum Fmt {
         f.timeZone = .current
         f.dateFormat = "yyyy-MM-dd"
         return f.string(from: Date())
+    }
+}
+
+// MARK: - Login item
+
+/// "Open at login", via `SMAppService`.
+///
+/// macOS stores the login item as a *path* and resolves this bundle identifier through
+/// LaunchServices, which points at whichever copy is running — so registering while a
+/// copy in a build directory is open records *that* directory, and the item breaks as
+/// soon as it is rebuilt or deleted. `status`, on the other hand, answers per bundle
+/// identifier: it reports `enabled` from any copy, including one that is not the
+/// registered one. `location` therefore says which copy is *asking*, never which copy
+/// is registered; `sfltool dumpbtm` is the only thing that knows that.
+enum LoginItem {
+    static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
+
+    static func set(_ on: Bool) throws {
+        if on { try SMAppService.mainApp.register() }
+        else { try SMAppService.mainApp.unregister() }
+    }
+
+    /// The copy asking the question — not necessarily the one registered.
+    static var location: String { Bundle.main.bundleURL.path }
+
+    static var describe: String {
+        switch SMAppService.mainApp.status {
+        case .enabled:          return "enabled"
+        case .notRegistered:    return "not registered"
+        case .requiresApproval: return "waiting for approval in System Settings › General › Login Items"
+        case .notFound:         return "not found (is this running from inside a .app bundle?)"
+        @unknown default:       return "unknown"
+        }
     }
 }

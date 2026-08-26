@@ -38,6 +38,22 @@ private func runCommand(_ argument: String) -> Int32 {
             return 1
         }
 
+    case "--login-item-status":
+        print("\(LoginItem.describe)\n  asked from: \(LoginItem.location)")
+        return 0
+
+    case "--enable-login-item", "--disable-login-item":
+        let on = argument == "--enable-login-item"
+        do {
+            try LoginItem.set(on)
+            print("ok: \(LoginItem.describe)")
+            print("  registered: \(LoginItem.location)")
+            return 0
+        } catch {
+            FileHandle.standardError.write(Data("\(on ? "enable" : "disable") failed: \(error)\n".utf8))
+            return 1
+        }
+
     case "--print-token":
         print(TokenStore.loadOrCreate())
         return 0
@@ -57,6 +73,9 @@ private func runCommand(_ argument: String) -> Int32 {
                                    writes its rate_limits to \(Paths.cliDump.path)
           --uninstall-statusline   restore the previous status line command
           --statusline-status      report whether the shim is installed
+          --enable-login-item      open this copy of the app at login
+          --disable-login-item     stop opening it at login
+          --login-item-status      report whether it opens at login
           --print-token            print the loopback token for the extension's options
           --print-port             print the port the app listens on
           --selftest               run the settings.json patcher checks

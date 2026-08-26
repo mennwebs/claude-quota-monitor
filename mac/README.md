@@ -81,6 +81,22 @@ From the repo root, `npm run build:mac` does the same thing.
 
 Needs macOS 14+ and a Swift toolchain (Xcode or the command line tools). No dependencies.
 
+### Open at login
+
+**ตั้งค่า… → ทั่วไป → เปิดโปรแกรมตอนล็อกอิน**, or:
+
+```bash
+"/Applications/Claude Quota.app/Contents/MacOS/ClaudeQuota" --enable-login-item
+```
+
+Register the copy you actually intend to keep. macOS stores the login item as a *path*, and it
+resolves the bundle identifier through LaunchServices — which points at whichever copy is
+running. Registering while a build directory copy is open records that directory, and the login
+item breaks the moment it is rebuilt or deleted. Quit every other copy first, launch the one in
+`/Applications`, then register. `--login-item-status` answers per bundle identifier, not per
+path, so it will say `enabled` from any copy; `sfltool dumpbtm | grep -A8 claude-quota` is what
+actually shows the registered path.
+
 ### Connect a browser profile
 
 1. In the menu bar app: **ตั้งค่า… → ทั่วไป**, copy the token.
@@ -110,6 +126,9 @@ is kept. `--uninstall-statusline` puts it back byte for byte.
 --install-statusline     wrap the configured status line
 --uninstall-statusline   restore the previous one
 --statusline-status      report whether the shim is installed
+--enable-login-item      open this copy of the app at login
+--disable-login-item     stop opening it at login
+--login-item-status      report whether it opens at login
 --print-token            print the loopback token
 --print-port             print the port
 --selftest               run the settings.json patcher checks

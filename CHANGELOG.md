@@ -20,6 +20,13 @@ All notable changes to Claude Quota Monitor are documented here.
 - `tests/test-bridge.js` — checks over the payload builder and the alarm scheduling, loading
   `bridge.js` and `background.js` themselves rather than copies, so they cannot drift.
 
+### Added
+- `--enable-login-item` / `--disable-login-item` / `--login-item-status` on the Mac app, next to
+  the statusline flags and for the same reason: "open at login" is a persistent change to the
+  machine, and being able to set and inspect it from a terminal makes it auditable. The GUI
+  toggle in ตั้งค่า → ทั่วไป is unchanged. `LoginItem` moved from `SettingsView.swift` to
+  `Support.swift` — the CLI needs it and it was never a view.
+
 ### Fixed
 - **Mac panel showed no bars at all** — `ScrollView { … }.frame(maxHeight:)` reports almost no
   ideal height when asked for one with no proposal, which is exactly what a `MenuBarExtra`
