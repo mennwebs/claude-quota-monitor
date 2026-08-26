@@ -74,6 +74,13 @@ private struct GeneralSettings: View {
                 }
             }
 
+            Section("จังหวะการใช้") {
+                Text("ทุกแท่งมีรอยบากตรงตำแหน่งที่ควรอยู่ถ้าใช้เฉลี่ยทั้งงวด อยู่ซ้ายรอยคือยังไหว อยู่ขวาคือเร็วกว่างวดจะรับได้ ถ้าคาดว่าจะเต็มก่อนรีเซ็ตจริง ช่องขวาจะเปลี่ยนจากเวลารีเซ็ตเป็นเวลาที่จะเต็ม")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("cap รายโมเดลยังคิดให้ไม่ได้ เพราะ API ส่ง resets_at มาเป็น null")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("ถือว่าค่าเก่าเมื่อ") {
                 MinuteStepper(title: "เริ่มจาง", seconds: $store.settings.thresholds.fresh, range: 1...60)
                 MinuteStepper(title: "จางลงอีก", seconds: $store.settings.thresholds.aging, range: 5...240)
@@ -250,10 +257,7 @@ private struct LocalSettings: View {
                 Text("Claude Code ส่ง `rate_limits` ให้ status line ทุกครั้งที่ render · shim ก๊อป JSON นั้นลงไฟล์แล้วส่งต่อให้ status line เดิมโดยไม่เปลี่ยนหน้าตาอะไร ได้ 5h/7d สด ๆ ไม่ต้องยิง API แลกกับที่มันทำงานเฉพาะตอนมีแถบสถานะให้วาด คือ Claude Code ในเทอร์มินัลเท่านั้น")
                     .font(.caption).foregroundStyle(.secondary)
 
-                Text("อีกทางคือ `cachedUsageUtilization` ใน `~/.claude.json` โควตาชุดล่าสุดที่ Claude Code ดึงมา ครบกว่า (มี cap รายโมเดลกับเครดิต) บอกบัญชีของตัวเองมาในตัว ไม่ต้องพึ่งแถบสถานะ แลกกับที่ Claude Code รีเฟรชตามจังหวะของมันเอง ห่างเป็นวันก็มี ทุกค่าจึงประทับเวลา `fetchedAtMs` ไว้ให้ panel หรี่ตามอายุจริง")
-                    .font(.caption).foregroundStyle(.secondary)
-
-                Toggle("อ่านโควตาจาก Claude Code ในเครื่อง", isOn: $store.settings.readCLIStatusline)
+                Toggle("อ่านไฟล์ที่ shim เขียน", isOn: $store.settings.readCLIStatusline)
             }
 
             Section("สถิติในเครื่อง") {

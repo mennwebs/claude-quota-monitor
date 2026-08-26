@@ -307,14 +307,16 @@ struct LimitRow: View {
     /// This reading's own age. An account can be reporting every second and still be
     /// showing an Opus figure from three hours ago.
     private var freshness: Freshness { reading.freshness(at: now, thresholds: thresholds) }
+    private var pace: Pace? { reading.pace(id: limit.id, at: now) }
 
     var body: some View {
         HStack(spacing: RowMetric.gap) {
             RowLabel(limit.short)
-            QuotaBar(pct: pct, freshness: freshness, hollow: expired)
+            QuotaBar(pct: pct, freshness: freshness, hollow: expired,
+                     par: pace.map { $0.elapsed * 100 })
                 .frame(height: Theme.barHeight)
             PctText(pct: pct, expired: expired, freshness: freshness)
-            ResetText(resets: reading.resetsAt, expired: expired, now: now)
+            ResetText(resets: reading.resetsAt, expired: expired, now: now, pace: pace)
         }
     }
 }
@@ -334,6 +336,8 @@ struct ModelGroupRow: View {
     private var rest: [Limit] { Array(limits.dropFirst()) }
     private var expired: Bool { top.reading.expired(at: now) }
     private var freshness: Freshness { top.reading.freshness(at: now, thresholds: thresholds) }
+    // nil in practice today: the API sends no `resets_at` for per-model caps.
+    private var pace: Pace? { top.reading.pace(id: top.id, at: now) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -342,10 +346,11 @@ struct ModelGroupRow: View {
                 QuotaBar(pct: top.reading.effectivePct(at: now),
                          freshness: freshness,
                          hollow: expired,
-                         ticks: rest.map { $0.reading.effectivePct(at: now) })
+                         ticks: rest.map { $0.reading.effectivePct(at: now) },
+                         par: pace.map { $0.elapsed * 100 })
                     .frame(height: Theme.barHeight)
                 PctText(pct: top.reading.effectivePct(at: now), expired: expired, freshness: freshness)
-                ResetText(resets: top.reading.resetsAt, expired: expired, now: now)
+                ResetText(resets: top.reading.resetsAt, expired: expired, now: now, pace: pace)
             }
 
             if !rest.isEmpty {
@@ -390,19 +395,34 @@ private struct PctText: View {
     }
 }
 
-/// After a reset the next one is not knowable: the 5-hour window starts on the next
-/// message, not on a schedule. Say that instead of inventing a countdown. The exact
-/// wall-clock time is a tooltip — the countdown is what anyone acts on.
+/// The right-hand column always counts down to the reset. That is the number anyone
+/// acts on, and swapping it for a second duration cost more than it bought: two
+/// countdowns in one column, minutes apart and meaning different things, is a puzzle
+/// rather than a warning.
+///
+/// So a window heading for trouble keeps its countdown and turns red, and the reason
+/// waits in the tooltip. Colour asks the question; hovering answers it.
+///
+/// After a reset the next one is not knowable at all: the 5-hour window starts on the
+/// next message, not on a schedule. Say so rather than invent a countdown.
 private struct ResetText: View {
     let resets: Date?
     let expired: Bool
     let now: Date
+    var pace: Pace?
+
+    /// True when this window is on course to run out before it resets. `exhaustsIn` is
+    /// the gate rather than the level alone: it is nil for a window already at 100%,
+    /// which has nothing left to run out of and should keep reading as merely full.
+    private var willRunOut: Bool {
+        !expired && pace?.level == .short && pace?.exhaustsIn != nil
+    }
 
     var body: some View {
         Text(text)
             .font(.system(size: 9))
             .monospacedDigit()
-            .foregroundStyle(Theme.inkFaint)
+            .foregroundStyle(willRunOut ? Theme.color(for: 100) : Theme.inkFaint)
             .lineLimit(1)
             .frame(width: RowMetric.trailing, alignment: .trailing)
             .help(tooltip)
@@ -415,7 +435,9 @@ private struct ResetText: View {
 
     private var tooltip: String {
         guard let resets else { return "" }
-        return expired ? "รีเซ็ตแล้ว · รอใช้ครั้งถัดไป" : "รีเซ็ต \(Fmt.clock(resets, now: now))"
+        if expired { return "รีเซ็ตแล้ว · รอใช้ครั้งถัดไป" }
+        let reset = "รีเซ็ต \(Fmt.clock(resets, now: now))"
+        return willRunOut ? "อาจติดลิมิตก่อนกำหนด · \(reset)" : reset
     }
 }
 
@@ -425,6 +447,10 @@ struct QuotaBar: View {
     var hollow: Bool = false
     /// Other readings sharing this track, drawn as marks rather than as their own row.
     var ticks: [Double] = []
+    /// Where the fill would be if this window were being spent evenly, 0…100. Drawn as
+    /// a notch rather than as ink: it is a mark on the ruler, not another reading, and
+    /// the only comparison that matters is which side of it the fill is on.
+    var par: Double?
 
     var body: some View {
         GeometryReader { geo in
@@ -445,6 +471,15 @@ struct QuotaBar: View {
                             .frame(width: 2)
                             .offset(x: max(0, min(geo.size.width - 2,
                                                   geo.size.width * tick / 100 - 1)))
+                    }
+                    // Cut in the card's own colour so it reads as a gap in the track
+                    // rather than as a third value competing with the fill.
+                    if let par, par > 0, par < 100 {
+                        Rectangle()
+                            .fill(Theme.card)
+                            .frame(width: 1.5)
+                            .offset(x: max(0, min(geo.size.width - 1.5,
+                                                  geo.size.width * par / 100 - 0.75)))
                     }
                 }
             }

@@ -19,23 +19,34 @@ Two sources, merged per account, newest observation wins per limit.
 reads from `claude.ai` to `127.0.0.1`. One Chrome profile per account; each profile reports the
 account it is signed in as.
 
-**2. Claude Code on this machine.** Two carriers, because neither is enough alone.
+**2. Claude Code on this machine.** Claude Code hands its status line command a JSON blob on
+every render containing the live `rate_limits`, and a shim copies it to a file. No API call, no
+polling, no extra process, and it is the freshest source there is — but only while something is
+rendering a status line, which means Claude Code in a terminal. In the desktop app the shim
+never runs at all, and the local source simply goes quiet.
 
-The **status line** gets a JSON blob on every render containing the live `rate_limits`, and a
-shim copies it to a file. No API call, no polling, no extra process, and it is the freshest
-source there is — but only while something is rendering a status line, which means Claude Code
-in a terminal. In the desktop app the shim never runs at all.
+### Why `cachedUsageUtilization` is not read
 
-**`cachedUsageUtilization` in `~/.claude.json`** is the last quota response Claude Code fetched,
-and it needs no status line. It is also the more complete of the two: 5h and 7d, the dynamic
-per-model list, and the credit balance, plus the account uuid it was fetched for. What it does
-not give is freshness — Claude Code refreshes it on its own schedule, which can be a day apart —
-so every reading is stamped with the block's `fetchedAtMs` and aged from that, never from when
-the file was read.
+`~/.claude.json` also holds the last quota response Claude Code fetched, under
+`cachedUsageUtilization`, and it needs no status line. It was wired up and then removed, because
+the block cannot say whose quota it is holding.
 
-That uuid matters. `oauthAccount` in the same file names whoever is signed in *now*, and the two
-disagree the moment you switch accounts; the rest of the identity is only borrowed when they
-agree, or one account's quota lands in another's row.
+It carries exactly three fields — `fetchedAtMs`, `accountUuid`, `utilization` — and no
+organization. On this machine it read `accountUuid` = the account signed in, while the numbers
+and reset instants matched a *different* account's browser reading to the second: 5h 30% and 7d
+27% resetting 08-31T17:00Z, against that account's own org, which was at 0% with a reset two days
+later. Quota belongs to a rate-limit bucket, the block names an account, and the two are not the
+same thing.
+
+Filed under the account it names, that reading overwrote a correct row with somebody else's
+numbers — and it won the merge, because it was newer. A cross-check against the browser's reset
+time would have caught this one, but only for accounts a browser is already reporting, which are
+exactly the accounts that do not need a fallback.
+
+The status line payload has the same shape of weakness: it carries no account either, so its
+identity comes from `oauthAccount`. It is kept because the reading and the identity at least come
+from the same live session, but a session working under another organization can misfile the same
+way. Treat any local-CLI row with suspicion when it disagrees with the browser.
 
 Neither side is complete on its own. The status line has no per-model ceilings and does not say
 which account it belongs to; the extension does not know about your terminal. Merged, one
@@ -75,6 +86,7 @@ Opus figure quietly goes hours old. Each row is dimmed on its own clock.
 | Never reported | hollow outline, not `0%` |
 | Nothing reporting for 5 min | hollow gold dot, "เงียบ 41 นาที" on the row and in the header |
 | A source silent for 3 hours | its badge (`CLI`, `Dia`, …) disappears until it reports again |
+| Spending the window faster than it can carry | a notch on the bar at the even-pace mark; past 110% projected, the reset countdown turns red |
 
 That last row is a different claim from the ones above it, and the panel used to be unable to
 make it. "This number is 40 minutes old" and "nothing has reported for 40 minutes" look
@@ -89,6 +101,49 @@ single short report cannot erase a figure that is still live.
 
 After a 5-hour window resets, the next reset time is genuinely unknowable — the window starts
 on your next message, not on a schedule. It says so instead of inventing a countdown.
+
+### Pace
+
+A bar answers "how full", which is not the question that ruins a week. 66% used looks comfortable
+next to a reset five days out, and is not: a quarter of the way into the window, that is a quota
+gone by Thursday.
+
+So each bar carries a notch where the fill would be if the window were being spent evenly —
+`(window − time left) / window`. Left of the notch is ahead, right of it is behind, and the eye
+makes the comparison without a number. It is drawn as a gap in the track rather than as ink,
+because it is a mark on the ruler and not another reading.
+
+When the projection passes 110% the right-hand column turns red. It keeps counting down to the
+reset — that is still the number anyone acts on, and a second duration in the same column, minutes
+apart from the first and meaning something else, is a puzzle rather than a warning. The reason
+waits in the tooltip: *อาจติดลิมิตก่อนกำหนด*, then the reset time as before. Colour asks the
+question, hovering answers it.
+
+Ten percent of slack either side of 100 is deliberate: a session at 62% with 58% of it gone
+projects to 107%, which is a rounding error wearing an alarm's clothes.
+
+Pace is refused rather than guessed in four cases: no window length, no `resets_at` (which is
+every per-model cap today — the API sends null), a window already past its reset, and a window
+less than 15% elapsed. That last one matters most. The 5-hour window starts on your first message
+rather than on a schedule, so one message two minutes in projects to several hundred percent and
+means nothing at all.
+
+The projection is a flat average from the start of the window. It cannot know that you work
+Monday to Friday, so a weekly limit will read over-pace on a Friday and then flatten out. A slope
+taken from the last few readings would handle that, and would need a history this app does not
+keep yet.
+
+### Colour
+
+The two boundaries that matter are the extension's, 70 and 90, because the same percentage is
+read in both surfaces of the same product and 76% coming up gold in the panel while the popup
+drew it orange is the app contradicting itself. The extra step at 50 is the panel's own: bars sit
+side by side here, so "half way" is worth seeing at a glance. `statusline.sh` on this machine
+still breaks at 50/80 and is not ours to change.
+
+Colour never reads pace. A bar is coloured by how full it is and nothing else — otherwise a
+window at 92% would go green for being nearly over, which is the one direction this must never
+move. Pace speaks through the notch and the countdown instead.
 
 Source badges expire. They claim a source is feeding the row, so a `CLI` flag that could only
 ever be switched on kept asserting a status line that had not run since yesterday. Each source
@@ -186,9 +241,8 @@ request bodies at 256 KB, and requires the token on the one route that writes.
 press **Test**; it distinguishes "app not running" from "wrong token" from "no reading yet".
 
 **The `CLI` badge is missing** — that source has not produced a reading in three hours. The
-status line shim only runs in a terminal, and `cachedUsageUtilization` refreshes on Claude Code's
-own schedule, so working entirely in the desktop app can leave both quiet for a day. The row is
-still correct; it is being fed by the browser.
+status line shim only runs in a terminal, so working entirely in the desktop app leaves it quiet
+all day. The row is still correct; it is being fed by the browser.
 
 **Rows say "เงียบ" while the browser is open** — the extension is loaded unpacked, and Chromium
 does not watch its files. Page and content scripts are re-read from disk on demand, but the

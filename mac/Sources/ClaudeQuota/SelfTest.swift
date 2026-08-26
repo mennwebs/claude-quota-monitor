@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Checks on `JSONTextPatch`, the one piece that edits a file the user owns and
 /// hand-maintains. Run with `--selftest`.
@@ -308,77 +309,79 @@ enum SelfTest {
         check("the badge is stamped with the reading, not with the delivery",
               stamped.sourceBadges(rowLabel: "x", at: t0).isEmpty)
 
-        print("\n▸ Claude Code's own usage cache (~/.claude.json)")
-        // The one local source that does not need a status line to be rendered.
-        func configJSON(fetchedAtMs: String, uuid: String) -> Data {
-            Data("""
-            {"oauthAccount":{"accountUuid":"cli-acct","emailAddress":"M@Menn.me",
-                             "organizationUuid":"org-1","organizationName":"Menn"},
-             "cachedUsageUtilization":{
-               "fetchedAtMs":\(fetchedAtMs),
-               "accountUuid":"\(uuid)",
-               "utilization":{
-                 "five_hour":{"utilization":4,"resets_at":"2026-08-25T13:29:59.693266+00:00"},
-                 "seven_day":{"utilization":14,"resets_at":null},
-                 "seven_day_opus":null,
-                 "limits":[
-                   {"kind":"session","percent":4,"resets_at":null,"scope":null},
-                   {"kind":"weekly_all","percent":14,"resets_at":null,"scope":null},
-                   {"kind":"weekly_scoped","percent":7,"resets_at":null,
-                    "scope":{"model":{"display_name":"Claude Design"}}}],
-                 "extra_usage":{"is_enabled":false,"monthly_limit":null,
-                                "used_credits":null,"currency":"USD"}}}}
-            """.utf8)
+        print("\n▸ Pace — spending a window faster than it can carry")
+        let week: TimeInterval = 7 * 86_400
+        func weekly(_ pct: Double, leftInWindow: TimeInterval, at when: Date) -> LimitReading {
+            LimitReading(pct: pct, resetsAt: when.addingTimeInterval(leftInWindow),
+                         observedAt: when, source: .ext, label: nil)
         }
-        let cliIdentity = CLIIdentity(accountUuid: "cli-acct", email: "m@menn.me",
-                                      orgId: "org-1", orgName: "Menn", plan: nil)
-        let fetchedAt = t0.addingTimeInterval(-3600)
-        let fetchedMs = String(Int(fetchedAt.timeIntervalSince1970 * 1000))
 
-        if let r = Ingest.claudeConfigReport(configJSON(fetchedAtMs: fetchedMs, uuid: "cli-acct"),
-                                             identity: cliIdentity, receivedAt: t0) {
-            check("it reads as the local CLI source", r.source == .cli)
-            check("the structural ceilings come through", r.limits[LimitID.fiveHour]?.pct == 4
-                  && r.limits[LimitID.sevenDay]?.pct == 14)
-            check("so does the dynamic per-model list", r.limits["weekly:claude-design"]?.pct == 7)
-            check("with the API's own wording", r.limits["weekly:claude-design"]?.label == "Claude Design")
-            check("session and weekly_all are not duplicated as model caps",
-                  r.limits.count == 3)
-            check("readings are aged by fetchedAtMs, not by when we read the file",
-                  r.limits[LimitID.fiveHour]?.observedAt == fetchedAt)
-            check("the account is the one the cache names", r.accountUuid == "cli-acct")
-            check("and the rest of the identity is borrowed when they agree", r.email == "m@menn.me")
-            check("credits ride along", r.extra?.enabled == false)
-        } else { failed += 1; print("  ✗  a well-formed usage cache was rejected") }
+        // The Seed card as it stood: a quarter into the week, over a quarter spent.
+        if let p = weekly(27, leftInWindow: 5 * 86_400 + 8 * 3600, at: t0)
+                     .pace(id: LimitID.sevenDay, at: t0) {
+            check("elapsed is read from the reset time and the window length",
+                  abs(p.elapsed - 144_000 / week) < 0.001)
+            check("projected end of window", p.projected > 113 && p.projected < 114)
+            check("and it is called short", p.level == .short)
+            check("with the moment it runs out", (p.exhaustsIn ?? 0) > 0)
+        } else { failed += 1; print("  ✗  a mid-window weekly limit produced no pace") }
 
-        // `oauthAccount` names whoever is signed in *now*; the cache names whoever it was
-        // fetched for. Borrowing an email across that gap merges one person's quota into
-        // another person's row.
-        if let r = Ingest.claudeConfigReport(configJSON(fetchedAtMs: fetchedMs, uuid: "someone-else"),
-                                             identity: cliIdentity, receivedAt: t0) {
-            check("a cache for another account keeps its own uuid", r.accountUuid == "someone-else")
-            check("and borrows no email from the signed-in one", r.email == nil)
-            check("nor an organization", r.orgId == nil && r.orgName == nil)
-        } else { failed += 1; print("  ✗  a cache for another account was rejected outright") }
+        // Novem's: two days in, two thirds gone.
+        if let p = weekly(66, leftInWindow: 5 * 86_400 + 6 * 3600, at: t0)
+                     .pace(id: LimitID.sevenDay, at: t0) {
+            check("a quarter of the week elapsed", abs(p.elapsed - 0.25) < 0.001)
+            check("projects to more than double the window", p.projected > 263 && p.projected < 265)
+            let hours = (p.exhaustsIn ?? 0) / 3600
+            check("and runs out in about 21 hours", hours > 21.4 && hours < 21.8)
+        } else { failed += 1; print("  ✗  an over-pace weekly limit produced no pace") }
 
-        check("a block with no fetchedAtMs cannot be aged, so it is refused",
-              Ingest.claudeConfigReport(configJSON(fetchedAtMs: "null", uuid: "cli-acct"),
-                                        identity: cliIdentity, receivedAt: t0) == nil)
-        check("a config with no usage cache at all is refused",
-              Ingest.claudeConfigReport(Data(#"{"oauthAccount":{"accountUuid":"x"}}"#.utf8),
-                                        identity: nil, receivedAt: t0) == nil)
-        check("a reading cannot be stamped in the future",
-              Ingest.claudeConfigReport(configJSON(fetchedAtMs: "4787648000000", uuid: "cli-acct"),
-                                        identity: cliIdentity, receivedAt: t0)?
-                  .limits[LimitID.fiveHour]?.observedAt == t0)
+        // Under pace: most of the window gone, less than half of it spent.
+        if let p = weekly(30, leftInWindow: 5_580, at: t0).pace(id: LimitID.fiveHour, at: t0) {
+            check("a window being spent slowly is on track", p.level == .onTrack)
+            check("and names no end", p.exhaustsIn == nil)
+        } else { failed += 1; print("  ✗  an under-pace session produced no pace") }
 
-        print("\n▸ Ingest.slug")
-        check("spaces become dashes", Ingest.slug("Claude Design") == "claude-design")
-        check("runs of punctuation collapse", Ingest.slug("Opus  4.5 (beta)") == "opus-4-5-beta")
-        check("no leading or trailing dash", !Ingest.slug("  Fable  ").hasPrefix("-")
-              && !Ingest.slug("  Fable  ").hasSuffix("-"))
-        check("and the result is an acceptable limit id",
-              LimitID.isAcceptable(LimitID.weeklyPrefix + Ingest.slug("Claude Design")))
+        check("the band around 100 does not flicker", [
+            (89.0, Pace.Level.onTrack), (90.0, .tight), (110.0, .tight), (111.0, .short)
+        ].allSatisfy { Pace(elapsed: 0.5, projected: $0.0, exhaustsIn: nil).level == $0.1 })
+        // 62% used with 58% of the session gone: a 7% overshoot, not an alarm.
+        check("a marginal overshoot stays inside the band",
+              Pace(elapsed: 0.58, projected: 107, exhaustsIn: 3600).level == .tight)
+
+        // A full window keeps its reset countdown instead of being told it runs out now.
+        if let p = weekly(100, leftInWindow: 2 * 3600, at: t0).pace(id: LimitID.fiveHour, at: t0) {
+            check("a window already spent predicts no end", p.exhaustsIn == nil)
+        } else { failed += 1; print("  ✗  a full window produced no pace at all") }
+
+        // Everything that has to answer "cannot say" rather than guess.
+        check("a per-model cap has no reset time, so no pace",
+              LimitReading(pct: 40, resetsAt: nil, observedAt: t0, source: .ext, label: "Fable")
+                  .pace(id: "weekly:fable", at: t0) == nil)
+        check("nor does a window that has already run out",
+              weekly(40, leftInWindow: -60, at: t0).pace(id: LimitID.sevenDay, at: t0) == nil)
+        // The 5-hour window starts on your first message, so its opening minutes are
+        // always over pace and always meaningless.
+        check("nor one that is 40 minutes old",
+              LimitReading(pct: 5, resetsAt: t0.addingTimeInterval(4 * 3600 + 20 * 60),
+                           observedAt: t0, source: .ext, label: nil)
+                  .pace(id: LimitID.fiveHour, at: t0) == nil)
+        check("but 46 minutes in it can be read",
+              LimitReading(pct: 5, resetsAt: t0.addingTimeInterval(4 * 3600 + 14 * 60),
+                           observedAt: t0, source: .ext, label: nil)
+                  .pace(id: LimitID.fiveHour, at: t0) != nil)
+        check("an unused window projects to nothing, not to a division by zero",
+              weekly(0, leftInWindow: 3 * 86_400, at: t0)
+                  .pace(id: LimitID.sevenDay, at: t0)?.projected == 0)
+
+        print("\n▸ Theme — the same number must read the same in both surfaces")
+        // The extension's badge and popup both break at 70 and 90. This panel breaking
+        // at 80 and 95 meant 76% came up gold here and orange there.
+        check("76% is the extension's orange, not gold", Theme.color(for: 76) == Theme.brand)
+        check("70 is where that starts", Theme.color(for: 70) == Theme.brand)
+        check("69 is still the step below", Theme.color(for: 69) == Theme.warning)
+        check("90 is red, as it is in the badge", Theme.color(for: 90) == Theme.color(for: 100))
+        check("89 is not", Theme.color(for: 89) == Theme.brand)
+        check("and the panel keeps its own half-way step", Theme.color(for: 49) != Theme.warning)
 
         print("\n▸ Persistence — a file from an earlier build must survive")
         // `AppSettings.load()` answers a failed decode with defaults, and Swift's
