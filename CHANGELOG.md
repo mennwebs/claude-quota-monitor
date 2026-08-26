@@ -39,7 +39,10 @@ All notable changes to Claude Quota Monitor are documented here.
   still looks broken: it gives the new window no focus, and the same click dismisses the panel,
   which deactivates the app and leaves the window behind whatever was in front. `SettingsWindow`
   watches for it and raises it — a `simultaneousGesture` on `SettingsLink` never fires, so the
-  click cannot be hooked.
+  click cannot be hooked. Raising is itself two things: the app becomes `.regular` while the
+  window is open, because an `.accessory` app does not win an activation contest, and the window
+  floats while it is open, because an app that re-activates itself a second later would
+  otherwise cover it. It reverts to a menu bar app on close.
 - **"เครื่องนี้: 0 tok · 0 ข้อความ"** — Claude Code recomputes `stats-cache.json` lazily, so
   today's entry is regularly missing on a machine that has been busy since morning. The panel
   and the settings pane now name the day the cache actually covers and show its figures instead

@@ -101,25 +101,28 @@ enum DarkWindows {
     }
 }
 
-/// Bringing the settings window to the front.
+/// Bringing the settings window to the front, and keeping it there.
 ///
 /// `SettingsLink` creates the window but hands it no focus, and the same click dismisses
-/// the panel, which deactivates a menu-bar-only app and drops the new window to the back
-/// of the stack — behind whatever the user was looking at. From their side that is
-/// indistinguishable from a button that does nothing.
+/// the panel, which deactivates a menu-bar-only app and drops the new window behind
+/// whatever the user was looking at. From their side that is indistinguishable from a
+/// button that does nothing.
 ///
-/// Hooking the click is not an option: a `simultaneousGesture` on `SettingsLink` never
-/// fires. So the window is watched for instead, and raised twice — once when it appears,
-/// and once more if the app resigns active right afterwards, which is the panel
-/// finishing its dismissal. A later deactivation is the user genuinely switching away
-/// and is left alone.
+/// Two things are needed, and neither is enough alone:
+///
+/// - `.regular` while the window is open. An `.accessory` app does not really win an
+///   activation contest; whichever app was frontmost takes focus back as the panel
+///   closes and pulls the settings window down with it. `.regular` is what "this app has
+///   a window you are using" means to macOS, and brings a Dock tile and menu bar with it.
+/// - `.floating` for as long as the window is open, so that an app which re-activates
+///   itself a second later cannot cover it. The window is open because it was asked for;
+///   it stops floating when it is closed.
+///
+/// The click itself cannot be hooked — a `simultaneousGesture` on `SettingsLink` never
+/// fires — so the window is watched for instead.
 enum SettingsWindow {
     private static let identifier = "com_apple_SwiftUI_Settings_window"
-    private static var openedAt: Date?
-
-    /// How long after the window appears a deactivation still counts as the panel
-    /// closing rather than the user changing their mind.
-    private static let graceWindow: TimeInterval = 2
+    private static var isOpen = false
 
     static func observe() -> [Any] {
         let appeared = NotificationCenter.default.addObserver(
@@ -127,37 +130,37 @@ enum SettingsWindow {
         ) { note in
             guard let window = note.object as? NSWindow,
                   window.identifier?.rawValue == identifier,
-                  window.isVisible, openedAt == nil
+                  window.isVisible, !isOpen
             else { return }
-            openedAt = Date()
+            isOpen = true
+            NSApp.setActivationPolicy(.regular)
+            window.level = .floating
             front(window)
+            // The panel is still dismissing itself, and that hands focus back to
+            // whoever had it. Take it once more after that has happened.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                guard isOpen, window.isVisible else { return }
+                front(window)
+            }
         }
 
-        let resigned = NotificationCenter.default.addObserver(
-            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
-        ) { _ in
-            guard let opened = openedAt, Date().timeIntervalSince(opened) < graceWindow,
-                  let window = current, window.isVisible
-            else { return }
-            front(window)
-        }
-
-        // Closing it arms the next open.
         let closed = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
         ) { note in
-            if (note.object as? NSWindow)?.identifier?.rawValue == identifier { openedAt = nil }
+            guard let window = note.object as? NSWindow,
+                  window.identifier?.rawValue == identifier else { return }
+            isOpen = false
+            window.level = .normal
+            // Back to a menu bar app: no Dock tile, no menu bar of its own.
+            NSApp.setActivationPolicy(.accessory)
         }
 
-        return [appeared, resigned, closed]
-    }
-
-    private static var current: NSWindow? {
-        NSApp.windows.first { $0.identifier?.rawValue == identifier }
+        return [appeared, closed]
     }
 
     private static func front(_ window: NSWindow) {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 }
