@@ -33,8 +33,13 @@ All notable changes to Claude Quota Monitor are documented here.
   window does. The window sized itself to 68pt: header, footer, and every account squeezed out
   of existence. `fixedSize(horizontal: false, vertical: true)` makes the scroll view report the
   height its content wants, and the frame still caps it so long lists scroll.
-- **"ตั้งค่า…" did nothing** — `NSApp.sendAction(Selector(("showSettingsWindow:")))` returns
-  `true` on macOS 26 and opens no window in a menu-bar-only app. Replaced with `SettingsLink`.
+- **"ตั้งค่า…" did nothing** — two faults, one symptom.
+  `NSApp.sendAction(Selector(("showSettingsWindow:")))` returns `true` on macOS 26 and opens no
+  window in a menu-bar-only app, so it is now `SettingsLink`. But `SettingsLink` on its own
+  still looks broken: it gives the new window no focus, and the same click dismisses the panel,
+  which deactivates the app and leaves the window behind whatever was in front. `SettingsWindow`
+  watches for it and raises it — a `simultaneousGesture` on `SettingsLink` never fires, so the
+  click cannot be hooked.
 - **"เครื่องนี้: 0 tok · 0 ข้อความ"** — Claude Code recomputes `stats-cache.json` lazily, so
   today's entry is regularly missing on a machine that has been busy since morning. The panel
   and the settings pane now name the day the cache actually covers and show its figures instead

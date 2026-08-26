@@ -20,13 +20,13 @@ struct ClaudeQuotaApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var appearanceObserver: Any?
+    private var observers: [Any] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menu bar only: no Dock tile, no window on launch. `LSUIElement` in Info.plist
         // covers the bundled case; this covers running the binary straight from `.build`.
         NSApp.setActivationPolicy(.accessory)
-        appearanceObserver = DarkWindows.observe()
+        observers = [DarkWindows.observe()] + SettingsWindow.observe()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -98,5 +98,66 @@ enum DarkWindows {
             else { return }
             window.appearance = NSAppearance(named: .darkAqua)
         }
+    }
+}
+
+/// Bringing the settings window to the front.
+///
+/// `SettingsLink` creates the window but hands it no focus, and the same click dismisses
+/// the panel, which deactivates a menu-bar-only app and drops the new window to the back
+/// of the stack — behind whatever the user was looking at. From their side that is
+/// indistinguishable from a button that does nothing.
+///
+/// Hooking the click is not an option: a `simultaneousGesture` on `SettingsLink` never
+/// fires. So the window is watched for instead, and raised twice — once when it appears,
+/// and once more if the app resigns active right afterwards, which is the panel
+/// finishing its dismissal. A later deactivation is the user genuinely switching away
+/// and is left alone.
+enum SettingsWindow {
+    private static let identifier = "com_apple_SwiftUI_Settings_window"
+    private static var openedAt: Date?
+
+    /// How long after the window appears a deactivation still counts as the panel
+    /// closing rather than the user changing their mind.
+    private static let graceWindow: TimeInterval = 2
+
+    static func observe() -> [Any] {
+        let appeared = NotificationCenter.default.addObserver(
+            forName: NSWindow.didUpdateNotification, object: nil, queue: .main
+        ) { note in
+            guard let window = note.object as? NSWindow,
+                  window.identifier?.rawValue == identifier,
+                  window.isVisible, openedAt == nil
+            else { return }
+            openedAt = Date()
+            front(window)
+        }
+
+        let resigned = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
+        ) { _ in
+            guard let opened = openedAt, Date().timeIntervalSince(opened) < graceWindow,
+                  let window = current, window.isVisible
+            else { return }
+            front(window)
+        }
+
+        // Closing it arms the next open.
+        let closed = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: nil, queue: .main
+        ) { note in
+            if (note.object as? NSWindow)?.identifier?.rawValue == identifier { openedAt = nil }
+        }
+
+        return [appeared, resigned, closed]
+    }
+
+    private static var current: NSWindow? {
+        NSApp.windows.first { $0.identifier?.rawValue == identifier }
+    }
+
+    private static func front(_ window: NSWindow) {
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 }

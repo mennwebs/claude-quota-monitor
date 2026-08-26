@@ -130,6 +130,7 @@ struct PanelView: View {
             HStack(spacing: 10) {
                 // `SettingsLink`, not `NSApp.sendAction(showSettingsWindow:)`: that
                 // selector reports success and opens nothing in a menu-bar-only app.
+                // The link alone is still not enough — see `SettingsWindow`.
                 SettingsLink {
                     Text("ตั้งค่า…")
                         .font(.system(size: 11))
