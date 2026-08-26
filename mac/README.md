@@ -19,23 +19,34 @@ Two sources, merged per account, newest observation wins per limit.
 reads from `claude.ai` to `127.0.0.1`. One Chrome profile per account; each profile reports the
 account it is signed in as.
 
-**2. Claude Code on this machine.** Two carriers, because neither is enough alone.
+**2. Claude Code on this machine.** Claude Code hands its status line command a JSON blob on
+every render containing the live `rate_limits`, and a shim copies it to a file. No API call, no
+polling, no extra process, and it is the freshest source there is — but only while something is
+rendering a status line, which means Claude Code in a terminal. In the desktop app the shim
+never runs at all, and the local source simply goes quiet.
 
-The **status line** gets a JSON blob on every render containing the live `rate_limits`, and a
-shim copies it to a file. No API call, no polling, no extra process, and it is the freshest
-source there is — but only while something is rendering a status line, which means Claude Code
-in a terminal. In the desktop app the shim never runs at all.
+### Why `cachedUsageUtilization` is not read
 
-**`cachedUsageUtilization` in `~/.claude.json`** is the last quota response Claude Code fetched,
-and it needs no status line. It is also the more complete of the two: 5h and 7d, the dynamic
-per-model list, and the credit balance, plus the account uuid it was fetched for. What it does
-not give is freshness — Claude Code refreshes it on its own schedule, which can be a day apart —
-so every reading is stamped with the block's `fetchedAtMs` and aged from that, never from when
-the file was read.
+`~/.claude.json` also holds the last quota response Claude Code fetched, under
+`cachedUsageUtilization`, and it needs no status line. It was wired up and then removed, because
+the block cannot say whose quota it is holding.
 
-That uuid matters. `oauthAccount` in the same file names whoever is signed in *now*, and the two
-disagree the moment you switch accounts; the rest of the identity is only borrowed when they
-agree, or one account's quota lands in another's row.
+It carries exactly three fields — `fetchedAtMs`, `accountUuid`, `utilization` — and no
+organization. On this machine it read `accountUuid` = the account signed in, while the numbers
+and reset instants matched a *different* account's browser reading to the second: 5h 30% and 7d
+27% resetting 08-31T17:00Z, against that account's own org, which was at 0% with a reset two days
+later. Quota belongs to a rate-limit bucket, the block names an account, and the two are not the
+same thing.
+
+Filed under the account it names, that reading overwrote a correct row with somebody else's
+numbers — and it won the merge, because it was newer. A cross-check against the browser's reset
+time would have caught this one, but only for accounts a browser is already reporting, which are
+exactly the accounts that do not need a fallback.
+
+The status line payload has the same shape of weakness: it carries no account either, so its
+identity comes from `oauthAccount`. It is kept because the reading and the identity at least come
+from the same live session, but a session working under another organization can misfile the same
+way. Treat any local-CLI row with suspicion when it disagrees with the browser.
 
 Neither side is complete on its own. The status line has no per-model ceilings and does not say
 which account it belongs to; the extension does not know about your terminal. Merged, one
@@ -186,9 +197,8 @@ request bodies at 256 KB, and requires the token on the one route that writes.
 press **Test**; it distinguishes "app not running" from "wrong token" from "no reading yet".
 
 **The `CLI` badge is missing** — that source has not produced a reading in three hours. The
-status line shim only runs in a terminal, and `cachedUsageUtilization` refreshes on Claude Code's
-own schedule, so working entirely in the desktop app can leave both quiet for a day. The row is
-still correct; it is being fed by the browser.
+status line shim only runs in a terminal, so working entirely in the desktop app leaves it quiet
+all day. The row is still correct; it is being fed by the browser.
 
 **Rows say "เงียบ" while the browser is open** — the extension is loaded unpacked, and Chromium
 does not watch its files. Page and content scripts are re-read from disk on demand, but the
