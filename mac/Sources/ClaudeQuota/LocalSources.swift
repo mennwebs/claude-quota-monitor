@@ -19,6 +19,10 @@ final class LocalSources {
 
     private var cliDumpStamp: Date?
     private var configStamp: Date?
+    /// The `fetchedAtMs` of the last usage block we emitted. Claude Code rewrites
+    /// `~/.claude.json` every couple of minutes but refreshes that block far more
+    /// rarely, and re-emitting an unchanged reading would keep marking the source live.
+    private var configUsageStamp: Date?
     private var statsStamp: Date?
     private var statsMissing = false
     private var identity: CLIIdentity?
@@ -65,7 +69,7 @@ final class LocalSources {
     // MARK: - Polling
 
     private func tick() {
-        refreshIdentity()
+        refreshClaudeConfig()
         if wantStatusline { refreshStatusline() }
         if wantStats { refreshStats() }
     }
@@ -74,11 +78,24 @@ final class LocalSources {
         (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date
     }
 
-    private func refreshIdentity() {
-        guard let m = Self.modified(Paths.claudeConfig) else { return }
-        guard m != configStamp else { return }
+    /// `~/.claude.json` carries two things: who the CLI is signed in as, and the last
+    /// quota response Claude Code fetched. The second is the only local source that does
+    /// not need a status line to be rendered, so it is read here rather than left to the
+    /// shim — see `Ingest.claudeConfigReport`.
+    private func refreshClaudeConfig() {
+        guard let m = Self.modified(Paths.claudeConfig), m != configStamp else { return }
         configStamp = m
-        identity = CLIIdentity.read()
+
+        guard let data = try? Data(contentsOf: Paths.claudeConfig) else { return }
+        identity = CLIIdentity.read(from: data)
+
+        guard wantStatusline,
+              let report = Ingest.claudeConfigReport(data, identity: identity),
+              let stamp = report.limits.values.map(\.observedAt).max(),
+              stamp != configUsageStamp
+        else { return }
+        configUsageStamp = stamp
+        onCLIReport(report)
     }
 
     private func refreshStatusline() {

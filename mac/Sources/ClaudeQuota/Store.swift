@@ -171,6 +171,12 @@ final class Store: ObservableObject {
         target.sawCLI      = target.sawCLI || victim.sawCLI
         target.browsers    = Array(Set(target.browsers).union(victim.browsers)).sorted()
         target.firstSeen   = min(target.firstSeen, victim.firstSeen)
+        target.lastContactAt = [target.lastContactAt, victim.lastContactAt].compactMap { $0 }.max()
+        if let inherited = victim.sourceSeen {
+            var seen = target.sourceSeen ?? [:]
+            for (name, when) in inherited { seen[name] = max(seen[name] ?? .distantPast, when) }
+            target.sourceSeen = seen
+        }
         for (k, r) in victim.limits where (target.limits[k]?.observedAt ?? .distantPast) < r.observedAt {
             target.limits[k] = r
         }
@@ -240,6 +246,19 @@ final class Store: ObservableObject {
 
     /// Newest observation anywhere, for the panel header.
     var lastUpdate: Date? { accounts.compactMap(\.observedAt).max() }
+
+    /// How long since *anything* reported, once that is long enough to be worth saying.
+    ///
+    /// `lastUpdate` is the age of the newest reading. The two diverge exactly when a
+    /// source stops reporting — a browser whose service worker is gone, an app the
+    /// extension can no longer reach — and that is the case the panel used to render
+    /// identically to a quiet afternoon.
+    var quietFor: TimeInterval? {
+        guard let newest = accounts.compactMap({ $0.lastContactAt ?? $0.observedAt }).max()
+        else { return nil }
+        let gap = now.timeIntervalSince(newest)
+        return gap >= AccountSnapshot.quietAfter ? gap : nil
+    }
 
     // MARK: - Settings changes
 

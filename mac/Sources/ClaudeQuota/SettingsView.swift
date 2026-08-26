@@ -55,7 +55,7 @@ private struct GeneralSettings: View {
                     }
                 }
 
-                Text("วางพอร์ตกับ token นี้ในหน้าตั้งค่าของ extension **ทุกโปรไฟล์ Chrome** ที่ต้องการให้รายงานเข้ามา")
+                Text("วางพอร์ตกับ token นี้ในหน้าตั้งค่าของ extension **ทุกโปรไฟล์** ที่ต้องการให้รายงานเข้ามา")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -78,7 +78,7 @@ private struct GeneralSettings: View {
                 MinuteStepper(title: "เริ่มจาง", seconds: $store.settings.thresholds.fresh, range: 1...60)
                 MinuteStepper(title: "จางลงอีก", seconds: $store.settings.thresholds.aging, range: 5...240)
                 MinuteStepper(title: "เทาทั้งแถว", seconds: $store.settings.thresholds.stale, range: 30...1440)
-                Text("ค่าที่เกินขีดสุดท้ายจะถูกทำเป็นสีเทาและใส่ ~ นำหน้า เพื่อบอกว่าอย่าเชื่อมาก")
+                Text("ค่าที่เกินขีดสุดท้ายจะกลายเป็นสีเทาและมี ~ นำหน้า แปลว่าอย่าเพิ่งเชื่อ")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -132,7 +132,7 @@ private struct AccountSettings: View {
             if store.accounts.isEmpty {
                 ContentUnavailableView("ยังไม่มีบัญชีรายงานเข้ามา",
                                        systemImage: "person.crop.circle.badge.questionmark",
-                                       description: Text("เปิด claude.ai ในโปรไฟล์ที่ตั้ง token ไว้แล้ว หรือรอ Claude Code render status line"))
+                                       description: Text("เปิด claude.ai ในโปรไฟล์ที่ตั้ง token ไว้แล้ว หรือรอ Claude Code ในเครื่องรายงานเข้ามา"))
             } else {
                 List {
                     ForEach(store.accounts) { account in
@@ -201,7 +201,7 @@ private struct AccountEditor: View {
             Button("ลบ", role: .destructive) { store.forget(account.key) }
             Button("ยกเลิก", role: .cancel) {}
         } message: {
-            Text("ถ้ามีรายงานเข้ามาอีก บัญชีนี้จะกลับมาใหม่โดยอัตโนมัติ")
+            Text("ถ้ามีรายงานเข้ามาอีก บัญชีนี้จะกลับมาเอง")
         }
     }
 
@@ -247,10 +247,13 @@ private struct LocalSettings: View {
                     Text(error).font(.caption).foregroundStyle(.orange)
                 }
 
-                Text("Claude Code ส่ง `rate_limits` ให้ status line ทุกครั้งที่ render — shim จะก๊อป JSON นั้นลงไฟล์แล้วส่งต่อให้ status line เดิมของคุณโดยไม่เปลี่ยนหน้าตาอะไร ได้ค่า 5h/7d ของบัญชีที่ CLI ล็อกอินอยู่แบบสด ๆ โดยไม่ยิง API")
+                Text("Claude Code ส่ง `rate_limits` ให้ status line ทุกครั้งที่ render · shim ก๊อป JSON นั้นลงไฟล์แล้วส่งต่อให้ status line เดิมโดยไม่เปลี่ยนหน้าตาอะไร ได้ 5h/7d สด ๆ ไม่ต้องยิง API แลกกับที่มันทำงานเฉพาะตอนมีแถบสถานะให้วาด คือ Claude Code ในเทอร์มินัลเท่านั้น")
                     .font(.caption).foregroundStyle(.secondary)
 
-                Toggle("อ่านไฟล์ที่ shim เขียน", isOn: $store.settings.readCLIStatusline)
+                Text("อีกทางคือ `cachedUsageUtilization` ใน `~/.claude.json` โควตาชุดล่าสุดที่ Claude Code ดึงมา ครบกว่า (มี cap รายโมเดลกับเครดิต) บอกบัญชีของตัวเองมาในตัว ไม่ต้องพึ่งแถบสถานะ แลกกับที่ Claude Code รีเฟรชตามจังหวะของมันเอง ห่างเป็นวันก็มี ทุกค่าจึงประทับเวลา `fetchedAtMs` ไว้ให้ panel หรี่ตามอายุจริง")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Toggle("อ่านโควตาจาก Claude Code ในเครื่อง", isOn: $store.settings.readCLIStatusline)
             }
 
             Section("สถิติในเครื่อง") {
@@ -265,7 +268,7 @@ private struct LocalSettings: View {
                             .monospacedDigit()
                     }
                 }
-                Text("เป็นจำนวนโทเคน/ข้อความ ไม่ใช่ % quota — Claude คิดน้ำหนักการใช้งานที่ฝั่งเซิร์ฟเวอร์ จึงแปลงกลับเป็นเปอร์เซ็นต์ไม่ได้ ตัวเลขนี้จึงแยกบรรทัดไว้ ไม่เอาไปปนกับ bar")
+                Text("เป็นจำนวนโทเคน/ข้อความ ไม่ใช่ % quota เพราะ Claude คิดน้ำหนักการใช้งานที่ฝั่งเซิร์ฟเวอร์ จึงแปลงกลับเป็นเปอร์เซ็นต์ไม่ได้ ตัวเลขนี้เลยแยกบรรทัดไว้ ไม่เอาไปปนกับ bar")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

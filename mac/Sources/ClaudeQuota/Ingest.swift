@@ -121,7 +121,104 @@ enum Ingest {
         )
     }
 
+    // MARK: - Claude Code's own usage cache (~/.claude.json)
+
+    /// Claude Code keeps the last quota response it fetched in `cachedUsageUtilization`,
+    /// stamped with `fetchedAtMs` and — crucially — with the account it belongs to.
+    ///
+    /// This is the only local source that does not need a terminal. The statusline shim
+    /// runs on render, so it only produces anything while Claude Code is drawing a status
+    /// line; in the desktop app it never fires at all. This block is written by whichever
+    /// session last refreshed its usage, whatever the surface.
+    ///
+    /// It is also the more complete of the two: the statusline payload carries 5h and 7d
+    /// and nothing else, while this carries the dynamic per-model list and the credit
+    /// balance as well. What it does not carry is freshness — Claude Code refreshes it on
+    /// its own schedule, which can be a day apart — hence `fetchedAtMs` on every reading
+    /// so the panel ages it honestly rather than presenting it as current.
+    static func claudeConfigReport(_ data: Data,
+                                   identity: CLIIdentity?,
+                                   receivedAt: Date = Date()) -> IncomingReport? {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let cache = root["cachedUsageUtilization"] as? [String: Any],
+              let fetched = parseFlexibleDate(cache["fetchedAtMs"]),
+              let uuid = nonEmpty(cache["accountUuid"]),
+              let u = cache["utilization"] as? [String: Any]
+        else { return nil }
+
+        let observedAt = min(fetched, receivedAt)
+
+        var limits: [String: LimitReading] = [:]
+        func put(_ id: String, _ entry: Any?, pctKey: String, label: String? = nil) {
+            guard let e = entry as? [String: Any], let pct = numeric(e[pctKey]) else { return }
+            limits[id] = LimitReading(pct: clampPct(pct), resetsAt: parseFlexibleDate(e["resets_at"]),
+                                      observedAt: observedAt, source: .cli, label: label)
+        }
+
+        put(LimitID.fiveHour, u["five_hour"], pctKey: "utilization")
+        put(LimitID.sevenDay, u["seven_day"], pctKey: "utilization")
+
+        // Same open-ended list the web API returns, and read the same way: whatever
+        // models come back get a row, keyed by slug and carrying their own label.
+        for case let entry as [String: Any] in (u["limits"] as? [Any] ?? []) {
+            guard (entry["kind"] as? String) == "weekly_scoped",
+                  let scope = entry["scope"] as? [String: Any],
+                  let model = scope["model"] as? [String: Any],
+                  let name = nonEmpty(model["display_name"])
+            else { continue }
+            let id = LimitID.weeklyPrefix + slug(name)
+            guard LimitID.isAcceptable(id) else { continue }
+            put(id, entry, pctKey: "percent", label: name)
+        }
+
+        guard !limits.isEmpty else { return nil }
+        if limits.count > maxLimitsPerReport {
+            let keep = Set(limits.keys.sorted().prefix(maxLimitsPerReport))
+            limits = limits.filter { keep.contains($0.key) }
+        }
+
+        var extra: ExtraUsage?
+        if let e = u["extra_usage"] as? [String: Any], let enabled = e["is_enabled"] as? Bool {
+            extra = ExtraUsage(enabled: enabled,
+                               used: numeric(e["used_credits"]) ?? 0,
+                               limit: numeric(e["monthly_limit"]) ?? 0,
+                               currency: e["currency"] as? String,
+                               observedAt: observedAt)
+        }
+
+        // The cache names its own account, and `oauthAccount` names whichever one the CLI
+        // is signed into *now*. They disagree the moment you switch accounts, so the rest
+        // of the identity is only borrowed when the two agree — a wrong email would merge
+        // this reading into somebody else's row.
+        let sameAccount = identity?.accountUuid == uuid
+        return IncomingReport(
+            source: .cli,
+            browser: nil,
+            accountUuid: uuid,
+            email: sameAccount ? identity?.email?.lowercased() : nil,
+            orgId: sameAccount ? identity?.orgId : nil,
+            orgName: sameAccount ? identity?.orgName : nil,
+            plan: sameAccount ? identity?.plan : nil,
+            limits: limits,
+            extra: extra,
+            receivedAt: receivedAt
+        )
+    }
+
     // MARK: - Helpers
+
+    /// "Claude Design" -> "claude-design". Must land inside `LimitID.isAcceptable`, so
+    /// anything that is not an ASCII letter or digit collapses into a single dash.
+    static func slug(_ name: String) -> String {
+        var out = ""
+        for ch in name.lowercased() {
+            if ch.isASCII && (ch.isLetter || ch.isNumber) { out.append(ch) }
+            else if !out.isEmpty && !out.hasSuffix("-") { out.append("-") }
+        }
+        while out.hasSuffix("-") { out.removeLast() }
+        return String(out.prefix(32))
+    }
+
 
     private static func numeric(_ v: Any?) -> Double? {
         switch v {
@@ -155,8 +252,14 @@ struct CLIIdentity: Equatable, Sendable {
     /// `~/.claude.json` is large (hundreds of KB of unrelated project history) but
     /// only changes when Claude Code writes it, so this runs on an mtime change, not a timer.
     static func read(from url: URL = Paths.claudeConfig) -> CLIIdentity? {
-        guard let data = try? Data(contentsOf: url),
-              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return read(from: data)
+    }
+
+    /// Taken as bytes so the caller can parse the file once: it is hundreds of KB, and
+    /// the usage block beside `oauthAccount` is read on the same pass.
+    static func read(from data: Data) -> CLIIdentity? {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let acct = root["oauthAccount"] as? [String: Any]
         else { return nil }
         return CLIIdentity(

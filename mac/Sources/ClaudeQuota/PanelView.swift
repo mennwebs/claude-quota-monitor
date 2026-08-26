@@ -68,11 +68,7 @@ struct PanelView: View {
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(Theme.ink)
             Spacer()
-            if let last = store.lastUpdate {
-                Text(Fmt.ago(last, now: store.now))
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(Theme.inkFaint)
-            }
+            freshnessNote
             Button {
                 store.requestRefresh()
             } label: {
@@ -81,10 +77,27 @@ struct PanelView: View {
                     .foregroundStyle(Theme.inkMuted)
             }
             .buttonStyle(.borderless)
-            .help("ขอให้เบราว์เซอร์ดึงค่าใหม่ในการเช็คอินรอบถัดไป (ไม่เกิน 1 นาที)")
+            .help("ขอให้เบราว์เซอร์ดึงค่าใหม่ตอนเช็คอินรอบหน้า (ไม่เกิน 1 นาที)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// Two different facts, and only one of them used to be sayable: how old the newest
+    /// reading is, and whether anything is still reporting. When they disagree the
+    /// silence is the one that matters — nothing arriving is a problem to go and fix,
+    /// while an old number on a live channel usually just means an idle afternoon.
+    @ViewBuilder private var freshnessNote: some View {
+        if let gap = store.quietFor {
+            Text(Fmt.quiet(gap))
+                .font(.system(size: 9.5))
+                .foregroundStyle(Theme.warning)
+                .help("ไม่มีรายงานเข้ามา \(Fmt.gap(gap)) · เบราว์เซอร์อาจปิดอยู่ หรือ extension ยังไม่ได้ reload หลังอัปเดตไฟล์")
+        } else if let last = store.lastUpdate {
+            Text(Fmt.ago(last, now: store.now))
+                .font(.system(size: 9.5))
+                .foregroundStyle(Theme.inkFaint)
+        }
     }
 
     // MARK: - Empty state
@@ -106,7 +119,7 @@ struct PanelView: View {
     private var statusHint: String {
         switch store.serverState {
         case .listening(let port):
-            return "กำลังรออยู่ที่ 127.0.0.1:\(port) — ใส่ token ในหน้าตั้งค่าของ extension ในแต่ละโปรไฟล์ Chrome"
+            return "ใส่ token ในหน้าตั้งค่าของ extension ในแต่ละโปรไฟล์ · รออยู่ที่ 127.0.0.1:\(port)"
         case .failed(let message):
             return "เปิดพอร์ตไม่ได้: \(message)"
         case .stopped:
@@ -164,12 +177,14 @@ struct AccountCard: View {
         account.freshness(at: now, thresholds: store.settings.thresholds)
     }
 
+    /// Nil while this row is still being reported. Held once per body so the dot and
+    /// the header text cannot disagree about it.
+    private var quiet: TimeInterval? { account.quietFor(at: now) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 5) {
-                Circle()
-                    .fill(freshness >= .stale ? Theme.inkFaint : Theme.color(for: 0))
-                    .frame(width: 5, height: 5)
+                statusDot
 
                 Text(store.label(for: account))
                     .font(.system(size: 11.5, weight: .semibold))
@@ -186,15 +201,23 @@ struct AccountCard: View {
 
                 Spacer(minLength: 3)
 
-                // Only worth saying once the number has aged enough to distrust.
-                if freshness >= .stale, let observed = account.observedAt {
+                // A row that has stopped reporting says so first: its numbers may still
+                // be minutes old and perfectly plausible, which is what made the state
+                // invisible. Only past that does the reading's own age get the space.
+                if let quiet {
+                    Text(Fmt.quiet(quiet))
+                        .font(.system(size: 8.5))
+                        .foregroundStyle(Theme.warning)
+                        .lineLimit(1)
+                        .help("โปรไฟล์นี้ไม่ได้ส่งรายงานมา \(Fmt.gap(quiet))")
+                } else if freshness >= .stale, let observed = account.observedAt {
                     Text(Fmt.ago(observed, now: now))
                         .font(.system(size: 8.5))
                         .foregroundStyle(Theme.inkFaint)
                         .lineLimit(1)
                         .help("อ่านล่าสุด \(Fmt.ago(observed, now: now))")
                 } else {
-                    SourceBadges(account: account)
+                    SourceBadges(account: account, label: store.label(for: account), now: now)
                 }
             }
             .padding(.bottom, 1)
@@ -217,15 +240,35 @@ struct AccountCard: View {
         .frame(width: Theme.cardWidth, alignment: .topLeading)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
+
+    /// Filled while something is reporting, hollow once nothing is. The old dot tracked
+    /// only the age of the numbers, which is why a channel that had died looked exactly
+    /// like one that simply had nothing new to say.
+    @ViewBuilder private var statusDot: some View {
+        if quiet != nil {
+            Circle()
+                .strokeBorder(Theme.warning.opacity(0.8), lineWidth: 1)
+                .frame(width: 5, height: 5)
+        } else {
+            Circle()
+                .fill(freshness >= .stale ? Theme.inkFaint : Theme.color(for: 0))
+                .frame(width: 5, height: 5)
+        }
+    }
 }
 
 private struct SourceBadges: View {
     let account: AccountSnapshot
+    /// The row's own name, so a badge cannot just repeat it.
+    let label: String
+    let now: Date
 
+    // Which sources still count, and which are only repeating the row's name, is decided
+    // in one place — see `AccountSnapshot.sourceBadges(rowLabel:at:)`. A badge that never
+    // expires ends up asserting that a browser profile renamed weeks ago is still here.
     var body: some View {
         HStack(spacing: 3) {
-            if account.sawCLI { badge("CLI") }
-            ForEach(account.browsers.prefix(2), id: \.self) { badge($0) }
+            ForEach(account.sourceBadges(rowLabel: label, at: now).prefix(2), id: \.self) { badge($0) }
         }
     }
 
@@ -452,19 +495,17 @@ struct StatsFooter: View {
             Image(systemName: "desktopcomputer")
                 .font(.system(size: 9))
                 .foregroundStyle(Theme.inkFaint)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(line)
-                    .font(.system(size: 10))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.inkMuted)
-                    .lineLimit(1)
-                // These counts are not quota — Claude weights usage server-side — so
-                // they get their own line and never feed a bar.
-                Text(behind ? "ไม่ใช่ % quota · วันนี้ยังไม่ถูกคำนวณ" : "ไม่ใช่ % quota")
-                    .font(.system(size: 8.5))
-                    .foregroundStyle(Theme.inkFaint)
-                    .lineLimit(1)
-            }
+            // These counts are not quota — Claude weights usage server-side — which is
+            // why they never feed a bar. Saying so under every render was a caption
+            // nobody needed twice; the date already carries the part that changes.
+            Text(line)
+                .font(.system(size: 10))
+                .monospacedDigit()
+                .foregroundStyle(Theme.inkMuted)
+                .lineLimit(1)
+                .help(behind
+                      ? "จำนวนโทเคน/ข้อความ ไม่ใช่ % quota · Claude Code ยังไม่ได้คำนวณของวันนี้ ตัวเลขนี้จึงเป็นของ \(Fmt.shortDay(day.date))"
+                      : "จำนวนโทเคน/ข้อความ ไม่ใช่ % quota")
             Spacer(minLength: 0)
             Sparkline(values: stats.daily.map { Double($0.tokens) })
                 .frame(width: 48, height: 13)

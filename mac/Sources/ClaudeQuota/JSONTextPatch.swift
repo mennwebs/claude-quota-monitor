@@ -14,7 +14,7 @@ enum JSONTextPatch {
         var errorDescription: String? {
             switch self {
             case .unparsable(let why):
-                return "แก้ settings.json แบบไม่กระทบส่วนอื่นไม่ได้ (\(why)) — กรุณาแก้ statusLine.command เองเพื่อความปลอดภัย"
+                return "แก้ settings.json แบบไม่กระทบส่วนอื่นไม่ได้ (\(why)) แก้ statusLine.command เองจะปลอดภัยกว่า"
             }
         }
     }

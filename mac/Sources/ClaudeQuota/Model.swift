@@ -169,6 +169,14 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
     var limits: [String: LimitReading] = [:]
     var extra: ExtraUsage?
     var firstSeen: Date = .distantPast
+    /// When a source last reported this account *at all*, whatever the reading said.
+    /// Optional so that a state file written before contact was tracked still decodes.
+    var lastContactAt: Date?
+    /// When each source last *observed* something, keyed by the badge it draws: "CLI",
+    /// or the browser's name. Stamped with the reading's own time rather than the time
+    /// the report landed, because that is what the badge claims — that this source is
+    /// feeding the row. Optional for the same decoding reason as `lastContactAt`.
+    var sourceSeen: [String: Date]?
 
     var id: String { key }
 
@@ -208,30 +216,118 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         return Freshness.of(now.timeIntervalSince(o), thresholds: thresholds)
     }
 
+    /// The extension re-posts its cached reading every minute even when nothing has
+    /// changed, so a gap this long means the channel has stopped rather than that the
+    /// poll is slow — the one thing the panel previously could not say.
+    ///
+    /// Deliberately not a field of `FreshnessThresholds`: Swift's synthesized
+    /// `Decodable` ignores default values, so a new stored property there would make
+    /// every settings file written before it fail to decode, and `AppSettings.load()`
+    /// answers a failed decode with defaults — silently discarding the user's labels.
+    static let quietAfter: TimeInterval = 5 * 60
+
+    /// How long since anything reported this account, or nil while it is still being
+    /// heard from. `observedAt` stands in for rows persisted before contact was tracked;
+    /// it can only over-state a gap, never hide one.
+    func quietFor(at now: Date) -> TimeInterval? {
+        guard let last = lastContactAt ?? observedAt else { return nil }
+        let gap = now.timeIntervalSince(last)
+        return gap >= Self.quietAfter ? gap : nil
+    }
+
+    /// A badge claims a source is feeding this row, so it has to be able to expire.
+    /// Generous enough that a terminal left idle over lunch keeps its chip, short enough
+    /// that a profile renamed weeks ago stops claiming to be here.
+    static let sourceBadgeAge: TimeInterval = 3 * 3600
+
+    /// Chips worth drawing: sources that have observed something recently, minus any
+    /// that only repeat the row's own name. The extension sends the profile name the
+    /// user typed into its options, and that is usually what the row is already called,
+    /// so "Menn … Menn" was the common case.
+    func sourceBadges(rowLabel: String, at now: Date) -> [String] {
+        let names: [String]
+        if let seen = sourceSeen, !seen.isEmpty {
+            names = seen
+                .filter { now.timeIntervalSince($0.value) < Self.sourceBadgeAge }
+                .keys
+                // The local CLI first, then browsers alphabetically. Written as a tuple
+                // so the ordering stays strict — `$0 == "CLI"` alone is not.
+                .sorted { ($0 == "CLI" ? 0 : 1, $0) < ($1 == "CLI" ? 0 : 1, $1) }
+        } else {
+            // A row persisted before per-source times existed. Fall back to the old
+            // flags rather than blanking every badge until the next report arrives.
+            names = (sawCLI ? ["CLI"] : []) + browsers
+        }
+        let row = rowLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        return names.filter {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                .caseInsensitiveCompare(row) != .orderedSame
+        }
+    }
+
+    private mutating func noteSource(_ name: String, at when: Date) {
+        var seen = sourceSeen ?? [:]
+        seen[name] = max(seen[name] ?? .distantPast, when)
+        sourceSeen = seen
+    }
+
     /// Merge a newly arrived report. Per-limit, newest observation wins; identity
     /// fields fill in whatever the other source did not know.
     mutating func absorb(_ r: IncomingReport) {
         if firstSeen == .distantPast { firstSeen = r.receivedAt }
+        lastContactAt = max(lastContactAt ?? .distantPast, r.receivedAt)
         accountUuid = r.accountUuid ?? accountUuid
         email       = r.email       ?? email
         orgId       = r.orgId       ?? orgId
         orgName     = r.orgName     ?? orgName
         plan        = r.plan        ?? plan
 
+        // What the badge claims is that this source is producing readings, so it is
+        // stamped with the newest observation in the report rather than with the moment
+        // the report arrived. A source re-delivering yesterday's numbers is not live.
+        let observed = r.limits.values.map(\.observedAt).max() ?? r.receivedAt
         if r.source == .cli {
             sawCLI = true
-        } else if let b = r.browser, !b.isEmpty, !browsers.contains(b) {
-            browsers.append(b)
-            browsers.sort()
+            noteSource("CLI", at: observed)
+        } else if let b = r.browser?.trimmingCharacters(in: .whitespacesAndNewlines), !b.isEmpty {
+            if !browsers.contains(b) {
+                browsers.append(b)
+                browsers.sort()
+            }
+            noteSource(b, at: observed)
         }
 
         for (rawKind, reading) in r.limits {
             if let existing = limits[rawKind], existing.observedAt > reading.observedAt { continue }
             limits[rawKind] = reading
         }
+        retireModelCaps(missingFrom: r)
 
         if let e = r.extra, extra.map({ $0.observedAt <= e.observedAt }) ?? true {
             extra = e
+        }
+    }
+
+    /// A model cap the API has stopped listing is dropped once it is this old. Long
+    /// enough that one hiccuped report cannot erase a reading that is still live, short
+    /// enough that a retired cap does not keep its place on the card all day.
+    static let retiredModelCapAge: TimeInterval = 3 * 3600
+
+    /// Per-model caps arrive as a list, so a model the API drops does not come back as
+    /// zero — it simply stops appearing, and nothing overwrites the last reading. Left
+    /// alone, an Opus bar from yesterday keeps its row next to today's numbers and reads
+    /// as one of them.
+    ///
+    /// Only an extension report may retire them: the status line never carries model
+    /// caps at all, so its silence about Opus is not evidence that Opus is gone.
+    private mutating func retireModelCaps(missingFrom r: IncomingReport) {
+        guard r.source == .ext else { return }
+        let cutoff = r.receivedAt.addingTimeInterval(-Self.retiredModelCapAge)
+        limits = limits.filter { id, reading in
+            guard id.hasPrefix(LimitID.weeklyPrefix), reading.source == .ext,
+                  r.limits[id] == nil
+            else { return true }
+            return reading.observedAt > cutoff
         }
     }
 }
