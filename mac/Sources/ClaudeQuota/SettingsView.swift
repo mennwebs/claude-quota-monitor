@@ -60,7 +60,6 @@ private struct GeneralSettings: View {
             }
 
             Section("การแสดงผล") {
-                Toggle("แสดง % ของบัญชีที่เต็มที่สุดข้างไอคอน", isOn: $store.settings.showPercentInMenuBar)
                 Toggle("เปิดโปรแกรมตอนล็อกอิน", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, on in
                         do { try LoginItem.set(on) ; loginError = nil }

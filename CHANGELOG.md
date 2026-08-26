@@ -49,6 +49,9 @@ All notable changes to Claude Quota Monitor are documented here.
   of a zero that reads as "you did nothing".
 
 ### Changed
+- **The menu bar shows bars only.** The percentage beside them named one account's number
+  while the glyph is about all of them at a glance, and the colour already says the same
+  thing. The "แสดง %" toggle in ตั้งค่า → การแสดงผล goes with it.
 - **Two columns.** Accounts sit side by side, so two of them take the height one used to. The
   panel is only as wide as the columns it shows: one account keeps it narrow.
 - **Per-model weekly caps share one row.** They all reset together and there can be any number
