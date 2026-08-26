@@ -120,6 +120,31 @@ enum SelfTest {
         check("todayKey is yyyy-MM-dd", key.count == 10 && key.dropFirst(4).first == "-")
         check("todayKey is a Gregorian year, not Buddhist", (Int(key.prefix(4)) ?? 0) < 2400)
 
+        print("\n▸ CLIStats — a cache that has not caught up with today")
+        // Claude Code recomputes stats-cache.json lazily, so "today" is regularly zero
+        // on a machine that has been busy since morning. Reporting that zero would say
+        // no work was done rather than none has been counted.
+        let behind = CLIStats(lastComputedDate: "2026-08-24", todayTokens: 0, todayMessages: 0,
+                              todaySessions: 0,
+                              daily: [CLIStats.DayPoint(date: "2026-08-23", tokens: 10, messages: 2),
+                                      CLIStats.DayPoint(date: "2026-08-24", tokens: 99, messages: 7)])
+        check("a stale cache is spotted", behind.isBehind(today: "2026-08-25"))
+        check("the day shown is the one it covers", behind.shown(today: "2026-08-25").date == "2026-08-24")
+        check("with that day's figures, not today's zeros", behind.shown(today: "2026-08-25").tokens == 99)
+        let current = CLIStats(lastComputedDate: "2026-08-25", todayTokens: 5, todayMessages: 1,
+                               todaySessions: 1,
+                               daily: [CLIStats.DayPoint(date: "2026-08-25", tokens: 5, messages: 1)])
+        check("a cache that is up to date reports today", !current.isBehind(today: "2026-08-25")
+              && current.shown(today: "2026-08-25").tokens == 5)
+        let empty = CLIStats(lastComputedDate: "2026-08-01", todayTokens: 0, todayMessages: 0,
+                             todaySessions: 0, daily: [])
+        check("no history at all falls back to today", empty.shown(today: "2026-08-25").date == "2026-08-25")
+
+        print("\n▸ Fmt.shortDay")
+        check("a date key is shortened, not echoed", Fmt.shortDay("2026-08-24") != "2026-08-24")
+        check("and names the right day", Fmt.shortDay("2026-08-24").hasPrefix("24"))
+        check("an unparseable key passes through", Fmt.shortDay("not-a-date") == "not-a-date")
+
         print("\n▸ Ingest — an open-ended limit key space")
         func report(_ limitsJSON: String) -> IncomingReport? {
             let body = """
@@ -168,7 +193,9 @@ enum SelfTest {
         }
         check("five_hour shows as 5h", limit(LimitID.fiveHour, nil).short == "5h")
         check("seven_day shows as 7d", limit(LimitID.sevenDay, nil).short == "7d")
-        check("a model uses the API's own wording", limit("weekly:claude-design", "Claude Design").short == "Claude Design")
+        check("a model uses the API's own wording", limit("weekly:sonnet", "Sonnet").short == "Sonnet")
+        check("a redundant Claude prefix is dropped", limit("weekly:claude-design", "Claude Design").short == "Design")
+        check("Claude on its own is left alone", limit("weekly:claude", "Claude").short == "Claude")
         check("a label-less model falls back to its slug", limit("weekly:fable", nil).short == "Fable")
         check("the session sorts first", limit(LimitID.fiveHour, nil).rank < limit("weekly:opus", "Opus").rank)
 

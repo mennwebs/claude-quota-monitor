@@ -1,4 +1,5 @@
 import Foundation
+import ServiceManagement
 
 // MARK: - Paths
 
@@ -191,6 +192,30 @@ enum Fmt {
         return s.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
+    /// "2026-08-24" → "24 ส.ค.". Parsed as a plain Gregorian key, printed in Thai
+    /// without a year, so a Buddhist-era locale cannot turn the day into 2569.
+    static func shortDay(_ key: String) -> String {
+        guard let date = dayKeyParser.date(from: key) else { return key }
+        return dayPrinter.string(from: date)
+    }
+
+    private static let dayKeyParser: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static let dayPrinter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "th_TH")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "d MMM"
+        return f
+    }()
+
     /// Must match the keys Claude Code writes into stats-cache.json, which are plain
     /// Gregorian ISO dates. `Locale.current` on a Thai-configured Mac carries the
     /// Buddhist calendar, so an unpinned formatter yields "2569-08-25" — every lookup
@@ -202,5 +227,38 @@ enum Fmt {
         f.timeZone = .current
         f.dateFormat = "yyyy-MM-dd"
         return f.string(from: Date())
+    }
+}
+
+// MARK: - Login item
+
+/// "Open at login", via `SMAppService`.
+///
+/// macOS stores the login item as a *path* and resolves this bundle identifier through
+/// LaunchServices, which points at whichever copy is running — so registering while a
+/// copy in a build directory is open records *that* directory, and the item breaks as
+/// soon as it is rebuilt or deleted. `status`, on the other hand, answers per bundle
+/// identifier: it reports `enabled` from any copy, including one that is not the
+/// registered one. `location` therefore says which copy is *asking*, never which copy
+/// is registered; `sfltool dumpbtm` is the only thing that knows that.
+enum LoginItem {
+    static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
+
+    static func set(_ on: Bool) throws {
+        if on { try SMAppService.mainApp.register() }
+        else { try SMAppService.mainApp.unregister() }
+    }
+
+    /// The copy asking the question — not necessarily the one registered.
+    static var location: String { Bundle.main.bundleURL.path }
+
+    static var describe: String {
+        switch SMAppService.mainApp.status {
+        case .enabled:          return "enabled"
+        case .notRegistered:    return "not registered"
+        case .requiresApproval: return "waiting for approval in System Settings › General › Login Items"
+        case .notFound:         return "not found (is this running from inside a .app bundle?)"
+        @unknown default:       return "unknown"
+        }
     }
 }

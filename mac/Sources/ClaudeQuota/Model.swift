@@ -44,7 +44,11 @@ struct Limit: Identifiable, Equatable, Sendable {
         case LimitID.fiveHour: return "5h"
         case LimitID.sevenDay: return "7d"
         default:
-            if let label = reading.label, !label.isEmpty { return label }
+            // "Claude Design" → "Design". The row already sits in a Claude panel, and
+            // the label column has no room to say so twice.
+            if let label = reading.label, !label.isEmpty {
+                return label.hasPrefix("Claude ") ? String(label.dropFirst(7)) : label
+            }
             return String(id.dropFirst(LimitID.weeklyPrefix.count)).capitalized
         }
     }
@@ -178,6 +182,19 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
             .sorted { ($0.rank, $0.short) < ($1.rank, $1.short) }
     }
 
+    /// The two ceilings every account has, whatever models it uses.
+    var structuralLimits: [Limit] { orderedLimits.filter { $0.rank < 2 } }
+
+    /// Per-model weekly caps, fullest first. They share one reset and there can be any
+    /// number of them, so the panel gives the group a single row rather than one each.
+    func modelLimits(at now: Date) -> [Limit] {
+        orderedLimits.filter { $0.rank == 2 }
+            .sorted { a, b in
+                let (x, y) = (a.reading.effectivePct(at: now), b.reading.effectivePct(at: now))
+                return x != y ? x > y : a.short < b.short
+            }
+    }
+
     /// The ceiling closest to blocking you. Weekly Opus routinely binds before the
     /// 5-hour window does, so "how full am I" cannot just read `five_hour`.
     func binding(at now: Date) -> Limit? {
@@ -263,4 +280,15 @@ struct CLIStats: Codable, Equatable, Sendable {
     /// True when the cache has not been recomputed for the current local day —
     /// in which case "today" is really "as of `lastComputedDate`".
     func isBehind(today: String) -> Bool { lastComputedDate < today }
+
+    /// The newest day the cache actually accounts for. Claude Code recomputes this file
+    /// lazily, so on a machine that has been working all morning "today" is still all
+    /// zeros — which reads as "you did nothing" rather than "not counted yet". The panel
+    /// shows this day, named, instead of a zero it knows to be wrong.
+    func shown(today: String) -> DayPoint {
+        guard isBehind(today: today), let last = daily.last else {
+            return DayPoint(date: today, tokens: todayTokens, messages: todayMessages)
+        }
+        return last
+    }
 }
