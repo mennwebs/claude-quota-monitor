@@ -88,14 +88,18 @@ there is no XCTest bundle.
   whole panel shrinks to its header and footer. It needs
   `.fixedSize(horizontal: false, vertical: true)`; a `.frame(maxHeight:)` alone is not enough,
   and the symptom is a panel with no content rather than a layout warning.
-- **Opening the settings window takes two fixes, not one.**
+- **Opening the settings window took three fixes, not one**, and each one looked like
+  the whole answer until it was tried against a real desktop.
   `NSApp.sendAction(Selector(("showSettingsWindow:")))` is a no-op on macOS 26 in a
   menu-bar-only app — it returns `true` and opens nothing, so use `SettingsLink`. But
-  `SettingsLink` alone still looks broken: it hands the new window no focus, and the same
-  click dismisses the panel, which deactivates the app and drops the window behind
-  whatever was in front. It has to be raised as well — see `SettingsWindow` in
-  `mac/Sources/ClaudeQuota/App.swift`. A `simultaneousGesture` on `SettingsLink` never
-  fires, so the raise watches for the window instead of hooking the click.
+  `SettingsLink` hands the new window no focus, and the same click dismisses the panel,
+  which deactivates the app and drops the window behind whatever was in front. Raising it
+  is still not enough: an `.accessory` app does not win an activation contest, so the app
+  has to become `.regular` while the window is open. And even then an app that
+  re-activates itself a moment later covers it, so the window is `.floating` for as long
+  as it is open. All three live in `SettingsWindow` in `mac/Sources/ClaudeQuota/App.swift`.
+  The click cannot be hooked — a `simultaneousGesture` on `SettingsLink` never fires — so
+  the window is watched for instead.
 - **`preferredColorScheme` does not reach the popover's window frame.** The pale ring around a
   dark panel is AppKit drawing the frame in the system appearance; only setting the window's
   `appearance` changes it. See `DarkWindows` in `mac/Sources/ClaudeQuota/App.swift` — and note
@@ -129,7 +133,16 @@ status item to open the panel — that is what activates the app for a real user
 button click no help at all. Poll for each state rather than sleeping: the synthetic click races
 with the panel becoming visible, and fixed delays produce runs that pass for the wrong reason.
 Anything else running that steals focus (a browser, another automation) will also skew the
-result, so judge it over several runs and A/B against the unfixed path.
+result, so judge it over several runs and A/B against the unfixed path. On this machine both
+Dia and Claude for Desktop re-activate themselves seconds later, which makes "who is frontmost
+at t+3s" unmeasurable; sample a trajectory (t+0.5, t+1, t+2) and report window *level* as well
+as key state, so a window that is genuinely on top is not scored as a failure.
+
+`screencapture` also fails outright — "could not create image from display" — whenever the
+screen is locked, and a crop step that reuses its last output will then silently produce a
+screenshot of something else entirely. Delete the target file first and check it exists before
+cropping. When it cannot be made to work, window geometry is evidence too: the panel is 184pt
+tall for two accounts and 290pt for four, which is a two-by-two grid without needing a picture.
 
 ## Checking the bridge without a browser
 
