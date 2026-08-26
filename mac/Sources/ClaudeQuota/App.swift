@@ -34,21 +34,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// The status item itself: one bar per account plus, optionally, the single number
-/// that matters — how full the fullest account is.
+/// The status item itself: one bar per account. Colour carries the level; the number
+/// it used to sit beside said less than the bars already do.
 struct MenuBarLabel: View {
     @ObservedObject var store: Store
 
     var body: some View {
-        HStack(spacing: 3) {
-            Image(nsImage: MenuBarIcon.render(bars))
-            if store.settings.showPercentInMenuBar, let worst {
-                Text("\(Int(worst.rounded()))%")
-                    .font(.system(size: 11, weight: .medium))
-                    .monospacedDigit()
-            }
-        }
-        .onAppear { store.start() }
+        Image(nsImage: MenuBarIcon.render(bars))
+            .onAppear { store.start() }
     }
 
     private var bars: [MenuBarIcon.Bar] {
@@ -69,15 +62,6 @@ struct MenuBarLabel: View {
         }
     }
 
-    /// Only readings we still believe get to drive the headline number — otherwise a
-    /// figure from this morning would sit in the menu bar looking current.
-    private var worst: Double? {
-        store.visibleAccounts
-            .compactMap { $0.binding(at: store.now)?.reading }
-            .filter { $0.freshness(at: store.now, thresholds: store.settings.thresholds) < .stale }
-            .map { $0.effectivePct(at: store.now) }
-            .max()
-    }
 }
 
 /// The panel paints its own near-black surface, but the frame *around* a popover is

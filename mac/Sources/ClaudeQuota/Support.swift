@@ -95,7 +95,6 @@ struct AppSettings: Codable, Equatable, Sendable {
     var hidden: Set<String> = []              // account keys the user removed from the panel
     var order: [String] = []                  // explicit panel order, keys not listed sort after
     var thresholds = FreshnessThresholds()
-    var showPercentInMenuBar = true
     var readCLIStatusline = true
     var readStatsCache = true
 
