@@ -19,13 +19,26 @@ Two sources, merged per account, newest observation wins per limit.
 reads from `claude.ai` to `127.0.0.1`. One Chrome profile per account; each profile reports the
 account it is signed in as.
 
-**2. Claude Code on this machine.** Claude Code hands its status line command a JSON blob on
-every render, and that blob contains the live `rate_limits`. A shim copies it to a file. No API
-call, no polling, no extra process — and it is the freshest source there is, updating as you
-work rather than every fifteen minutes.
+**2. Claude Code on this machine.** Two carriers, because neither is enough alone.
 
-Neither source is complete on its own. The status line has no per-model ceilings and does not
-say which account it belongs to; the extension does not know about your terminal. Merged, one
+The **status line** gets a JSON blob on every render containing the live `rate_limits`, and a
+shim copies it to a file. No API call, no polling, no extra process, and it is the freshest
+source there is — but only while something is rendering a status line, which means Claude Code
+in a terminal. In the desktop app the shim never runs at all.
+
+**`cachedUsageUtilization` in `~/.claude.json`** is the last quota response Claude Code fetched,
+and it needs no status line. It is also the more complete of the two: 5h and 7d, the dynamic
+per-model list, and the credit balance, plus the account uuid it was fetched for. What it does
+not give is freshness — Claude Code refreshes it on its own schedule, which can be a day apart —
+so every reading is stamped with the block's `fetchedAtMs` and aged from that, never from when
+the file was read.
+
+That uuid matters. `oauthAccount` in the same file names whoever is signed in *now*, and the two
+disagree the moment you switch accounts; the rest of the identity is only borrowed when they
+agree, or one account's quota lands in another's row.
+
+Neither side is complete on its own. The status line has no per-model ceilings and does not say
+which account it belongs to; the extension does not know about your terminal. Merged, one
 row shows 5h/7d from the CLI within seconds and the model caps from the browser.
 
 Model ceilings are not a fixed list. claude.ai reports them dynamically, so Fable showed up on
@@ -61,6 +74,7 @@ Opus figure quietly goes hours old. Each row is dimmed on its own clock.
 | Past its `resets_at` | empty dashed bar, "รีเซ็ตแล้ว · รอใช้ครั้งถัดไป" |
 | Never reported | hollow outline, not `0%` |
 | Nothing reporting for 5 min | hollow gold dot, "เงียบ 41 นาที" on the row and in the header |
+| A source silent for 3 hours | its badge (`CLI`, `Dia`, …) disappears until it reports again |
 
 That last row is a different claim from the ones above it, and the panel used to be unable to
 make it. "This number is 40 minutes old" and "nothing has reported for 40 minutes" look
@@ -76,9 +90,16 @@ single short report cannot erase a figure that is still live.
 After a 5-hour window resets, the next reset time is genuinely unknowable — the window starts
 on your next message, not on a schedule. It says so instead of inventing a countdown.
 
+Source badges expire. They claim a source is feeding the row, so a `CLI` flag that could only
+ever be switched on kept asserting a status line that had not run since yesterday. Each source
+now carries the time it last *observed* something — not the time it last delivered — so a source
+re-posting old numbers cannot pass as live.
+
 Token counts from `~/.claude/stats-cache.json` are shown on their own line and never fed into
 a bar. Claude weights usage server-side; tokens cannot be converted back into a percentage, and
-pretending otherwise would be the one lie that makes the whole panel untrustworthy.
+pretending otherwise would be the one lie that makes the whole panel untrustworthy. The line is
+named by the day it actually covers, which is the part that changes; that it is not a percentage
+is in the tooltip rather than repeated under every render.
 
 ## Install
 
@@ -163,6 +184,11 @@ request bodies at 256 KB, and requires the token on the one route that writes.
 
 **Menu bar shows a hollow outline** — nothing has reported yet. Open the extension's Options and
 press **Test**; it distinguishes "app not running" from "wrong token" from "no reading yet".
+
+**The `CLI` badge is missing** — that source has not produced a reading in three hours. The
+status line shim only runs in a terminal, and `cachedUsageUtilization` refreshes on Claude Code's
+own schedule, so working entirely in the desktop app can leave both quiet for a day. The row is
+still correct; it is being fed by the browser.
 
 **Rows say "เงียบ" while the browser is open** — the extension is loaded unpacked, and Chromium
 does not watch its files. Page and content scripts are re-read from disk on demand, but the

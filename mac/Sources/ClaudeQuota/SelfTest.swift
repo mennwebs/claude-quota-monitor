@@ -272,16 +272,113 @@ enum SelfTest {
 
         print("\n▸ Source badges")
         var badged = AccountSnapshot(key: "acct:badges")
-        badged.browsers = ["Chrome", "Seed"]
+        badged.sourceSeen = ["Chrome": t0, "Seed": t0]
         check("a badge that only repeats the row name goes",
-              badged.sourceBadges(rowLabel: "Seed") == ["Chrome"])
+              badged.sourceBadges(rowLabel: "Seed", at: t0) == ["Chrome"])
         check("case and padding do not save it",
-              badged.sourceBadges(rowLabel: "  seed ") == ["Chrome"])
+              badged.sourceBadges(rowLabel: "  seed ", at: t0) == ["Chrome"])
         check("one that says something new is kept",
-              badged.sourceBadges(rowLabel: "Menn") == ["Chrome", "Seed"])
+              badged.sourceBadges(rowLabel: "Menn", at: t0) == ["Chrome", "Seed"])
         var solo = AccountSnapshot(key: "acct:solo")
-        solo.browsers = ["Novem"]
-        check("and the only badge may go entirely", solo.sourceBadges(rowLabel: "Novem").isEmpty)
+        solo.sourceSeen = ["Novem": t0]
+        check("and the only badge may go entirely",
+              solo.sourceBadges(rowLabel: "Novem", at: t0).isEmpty)
+
+        // A badge asserts that the source is feeding this row. The CLI one was a boolean
+        // that could only ever be switched on, so it kept claiming a status line that had
+        // not run since yesterday.
+        var mixed = AccountSnapshot(key: "acct:mixed")
+        mixed.sourceSeen = ["CLI": t0.addingTimeInterval(-22 * 3600), "Dia": t0]
+        check("a source that has not observed anything in hours loses its badge",
+              mixed.sourceBadges(rowLabel: "Menn", at: t0) == ["Dia"])
+        mixed.sourceSeen?["CLI"] = t0.addingTimeInterval(-60)
+        check("and gets it back the moment it reports again",
+              mixed.sourceBadges(rowLabel: "Menn", at: t0) == ["CLI", "Dia"])
+
+        var legacyBadges = AccountSnapshot(key: "acct:legacy-badges")
+        legacyBadges.sawCLI = true
+        legacyBadges.browsers = ["Chrome"]
+        check("a row with no per-source times falls back to the old flags",
+              legacyBadges.sourceBadges(rowLabel: "Menn", at: t0) == ["CLI", "Chrome"])
+
+        var stamped = AccountSnapshot(key: "acct:stamped")
+        stamped.absorb(IncomingReport(source: .cli, browser: nil,
+                                      limits: [LimitID.fiveHour: reading(4, t0.addingTimeInterval(-22 * 3600), .cli)],
+                                      receivedAt: t0))
+        check("the badge is stamped with the reading, not with the delivery",
+              stamped.sourceBadges(rowLabel: "x", at: t0).isEmpty)
+
+        print("\n▸ Claude Code's own usage cache (~/.claude.json)")
+        // The one local source that does not need a status line to be rendered.
+        func configJSON(fetchedAtMs: String, uuid: String) -> Data {
+            Data("""
+            {"oauthAccount":{"accountUuid":"cli-acct","emailAddress":"M@Menn.me",
+                             "organizationUuid":"org-1","organizationName":"Menn"},
+             "cachedUsageUtilization":{
+               "fetchedAtMs":\(fetchedAtMs),
+               "accountUuid":"\(uuid)",
+               "utilization":{
+                 "five_hour":{"utilization":4,"resets_at":"2026-08-25T13:29:59.693266+00:00"},
+                 "seven_day":{"utilization":14,"resets_at":null},
+                 "seven_day_opus":null,
+                 "limits":[
+                   {"kind":"session","percent":4,"resets_at":null,"scope":null},
+                   {"kind":"weekly_all","percent":14,"resets_at":null,"scope":null},
+                   {"kind":"weekly_scoped","percent":7,"resets_at":null,
+                    "scope":{"model":{"display_name":"Claude Design"}}}],
+                 "extra_usage":{"is_enabled":false,"monthly_limit":null,
+                                "used_credits":null,"currency":"USD"}}}}
+            """.utf8)
+        }
+        let cliIdentity = CLIIdentity(accountUuid: "cli-acct", email: "m@menn.me",
+                                      orgId: "org-1", orgName: "Menn", plan: nil)
+        let fetchedAt = t0.addingTimeInterval(-3600)
+        let fetchedMs = String(Int(fetchedAt.timeIntervalSince1970 * 1000))
+
+        if let r = Ingest.claudeConfigReport(configJSON(fetchedAtMs: fetchedMs, uuid: "cli-acct"),
+                                             identity: cliIdentity, receivedAt: t0) {
+            check("it reads as the local CLI source", r.source == .cli)
+            check("the structural ceilings come through", r.limits[LimitID.fiveHour]?.pct == 4
+                  && r.limits[LimitID.sevenDay]?.pct == 14)
+            check("so does the dynamic per-model list", r.limits["weekly:claude-design"]?.pct == 7)
+            check("with the API's own wording", r.limits["weekly:claude-design"]?.label == "Claude Design")
+            check("session and weekly_all are not duplicated as model caps",
+                  r.limits.count == 3)
+            check("readings are aged by fetchedAtMs, not by when we read the file",
+                  r.limits[LimitID.fiveHour]?.observedAt == fetchedAt)
+            check("the account is the one the cache names", r.accountUuid == "cli-acct")
+            check("and the rest of the identity is borrowed when they agree", r.email == "m@menn.me")
+            check("credits ride along", r.extra?.enabled == false)
+        } else { failed += 1; print("  ✗  a well-formed usage cache was rejected") }
+
+        // `oauthAccount` names whoever is signed in *now*; the cache names whoever it was
+        // fetched for. Borrowing an email across that gap merges one person's quota into
+        // another person's row.
+        if let r = Ingest.claudeConfigReport(configJSON(fetchedAtMs: fetchedMs, uuid: "someone-else"),
+                                             identity: cliIdentity, receivedAt: t0) {
+            check("a cache for another account keeps its own uuid", r.accountUuid == "someone-else")
+            check("and borrows no email from the signed-in one", r.email == nil)
+            check("nor an organization", r.orgId == nil && r.orgName == nil)
+        } else { failed += 1; print("  ✗  a cache for another account was rejected outright") }
+
+        check("a block with no fetchedAtMs cannot be aged, so it is refused",
+              Ingest.claudeConfigReport(configJSON(fetchedAtMs: "null", uuid: "cli-acct"),
+                                        identity: cliIdentity, receivedAt: t0) == nil)
+        check("a config with no usage cache at all is refused",
+              Ingest.claudeConfigReport(Data(#"{"oauthAccount":{"accountUuid":"x"}}"#.utf8),
+                                        identity: nil, receivedAt: t0) == nil)
+        check("a reading cannot be stamped in the future",
+              Ingest.claudeConfigReport(configJSON(fetchedAtMs: "4787648000000", uuid: "cli-acct"),
+                                        identity: cliIdentity, receivedAt: t0)?
+                  .limits[LimitID.fiveHour]?.observedAt == t0)
+
+        print("\n▸ Ingest.slug")
+        check("spaces become dashes", Ingest.slug("Claude Design") == "claude-design")
+        check("runs of punctuation collapse", Ingest.slug("Opus  4.5 (beta)") == "opus-4-5-beta")
+        check("no leading or trailing dash", !Ingest.slug("  Fable  ").hasPrefix("-")
+              && !Ingest.slug("  Fable  ").hasSuffix("-"))
+        check("and the result is an acceptable limit id",
+              LimitID.isAcceptable(LimitID.weeklyPrefix + Ingest.slug("Claude Design")))
 
         print("\n▸ Persistence — a file from an earlier build must survive")
         // `AppSettings.load()` answers a failed decode with defaults, and Swift's

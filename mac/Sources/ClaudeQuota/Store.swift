@@ -172,6 +172,11 @@ final class Store: ObservableObject {
         target.browsers    = Array(Set(target.browsers).union(victim.browsers)).sorted()
         target.firstSeen   = min(target.firstSeen, victim.firstSeen)
         target.lastContactAt = [target.lastContactAt, victim.lastContactAt].compactMap { $0 }.max()
+        if let inherited = victim.sourceSeen {
+            var seen = target.sourceSeen ?? [:]
+            for (name, when) in inherited { seen[name] = max(seen[name] ?? .distantPast, when) }
+            target.sourceSeen = seen
+        }
         for (k, r) in victim.limits where (target.limits[k]?.observedAt ?? .distantPast) < r.observedAt {
             target.limits[k] = r
         }

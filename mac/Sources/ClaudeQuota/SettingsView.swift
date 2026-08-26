@@ -247,10 +247,13 @@ private struct LocalSettings: View {
                     Text(error).font(.caption).foregroundStyle(.orange)
                 }
 
-                Text("Claude Code ส่ง `rate_limits` ให้ status line ทุกครั้งที่ render — shim จะก๊อป JSON นั้นลงไฟล์แล้วส่งต่อให้ status line เดิมของคุณโดยไม่เปลี่ยนหน้าตาอะไร ได้ค่า 5h/7d ของบัญชีที่ CLI ล็อกอินอยู่แบบสด ๆ โดยไม่ยิง API")
+                Text("Claude Code ส่ง `rate_limits` ให้ status line ทุกครั้งที่ render — shim จะก๊อป JSON นั้นลงไฟล์แล้วส่งต่อให้ status line เดิมของคุณโดยไม่เปลี่ยนหน้าตาอะไร ได้ค่า 5h/7d แบบสด ๆ โดยไม่ยิง API แต่ทำงานเฉพาะตอนมีแถบสถานะให้วาด คือ Claude Code ในเทอร์มินัลเท่านั้น")
                     .font(.caption).foregroundStyle(.secondary)
 
-                Toggle("อ่านไฟล์ที่ shim เขียน", isOn: $store.settings.readCLIStatusline)
+                Text("อีกทางคือ `cachedUsageUtilization` ใน `~/.claude.json` — โควตาชุดล่าสุดที่ Claude Code ดึงมา ครบกว่า (มี cap รายโมเดลกับเครดิตด้วย) บอกบัญชีของตัวเองมาในตัว และไม่ต้องพึ่งแถบสถานะ แลกกับที่ Claude Code รีเฟรชมันตามจังหวะของมันเอง ห่างกันเป็นวันก็มี ทุกค่าจึงถูกประทับเวลา `fetchedAtMs` ไว้ให้ panel หรี่ตามอายุจริง")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Toggle("อ่านโควตาจาก Claude Code ในเครื่อง", isOn: $store.settings.readCLIStatusline)
             }
 
             Section("สถิติในเครื่อง") {

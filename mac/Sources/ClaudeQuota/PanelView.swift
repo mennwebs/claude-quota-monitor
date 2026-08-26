@@ -217,7 +217,7 @@ struct AccountCard: View {
                         .lineLimit(1)
                         .help("อ่านล่าสุด \(Fmt.ago(observed, now: now))")
                 } else {
-                    SourceBadges(account: account, label: store.label(for: account))
+                    SourceBadges(account: account, label: store.label(for: account), now: now)
                 }
             }
             .padding(.bottom, 1)
@@ -259,13 +259,16 @@ struct AccountCard: View {
 
 private struct SourceBadges: View {
     let account: AccountSnapshot
-    /// The row's own name, so a badge cannot just repeat it. See `sourceBadges(rowLabel:)`.
+    /// The row's own name, so a badge cannot just repeat it.
     let label: String
+    let now: Date
 
+    // Which sources still count, and which are only repeating the row's name, is decided
+    // in one place — see `AccountSnapshot.sourceBadges(rowLabel:at:)`. A badge that never
+    // expires ends up asserting that a browser profile renamed weeks ago is still here.
     var body: some View {
         HStack(spacing: 3) {
-            if account.sawCLI { badge("CLI") }
-            ForEach(account.sourceBadges(rowLabel: label).prefix(2), id: \.self) { badge($0) }
+            ForEach(account.sourceBadges(rowLabel: label, at: now).prefix(2), id: \.self) { badge($0) }
         }
     }
 
@@ -492,19 +495,17 @@ struct StatsFooter: View {
             Image(systemName: "desktopcomputer")
                 .font(.system(size: 9))
                 .foregroundStyle(Theme.inkFaint)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(line)
-                    .font(.system(size: 10))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.inkMuted)
-                    .lineLimit(1)
-                // These counts are not quota — Claude weights usage server-side — so
-                // they get their own line and never feed a bar.
-                Text(behind ? "ไม่ใช่ % quota · วันนี้ยังไม่ถูกคำนวณ" : "ไม่ใช่ % quota")
-                    .font(.system(size: 8.5))
-                    .foregroundStyle(Theme.inkFaint)
-                    .lineLimit(1)
-            }
+            // These counts are not quota — Claude weights usage server-side — which is
+            // why they never feed a bar. Saying so under every render was a caption
+            // nobody needed twice; the date already carries the part that changes.
+            Text(line)
+                .font(.system(size: 10))
+                .monospacedDigit()
+                .foregroundStyle(Theme.inkMuted)
+                .lineLimit(1)
+                .help(behind
+                      ? "จำนวนโทเคน/ข้อความ ไม่ใช่ % quota · Claude Code ยังไม่ได้คำนวณของวันนี้ ตัวเลขนี้จึงเป็นของ \(Fmt.shortDay(day.date))"
+                      : "จำนวนโทเคน/ข้อความ ไม่ใช่ % quota")
             Spacer(minLength: 0)
             Sparkline(values: stats.daily.map { Double($0.tokens) })
                 .frame(width: 48, height: 13)

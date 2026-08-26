@@ -172,6 +172,11 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
     /// When a source last reported this account *at all*, whatever the reading said.
     /// Optional so that a state file written before contact was tracked still decodes.
     var lastContactAt: Date?
+    /// When each source last *observed* something, keyed by the badge it draws: "CLI",
+    /// or the browser's name. Stamped with the reading's own time rather than the time
+    /// the report landed, because that is what the badge claims — that this source is
+    /// feeding the row. Optional for the same decoding reason as `lastContactAt`.
+    var sourceSeen: [String: Date]?
 
     var id: String { key }
 
@@ -230,15 +235,40 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         return gap >= Self.quietAfter ? gap : nil
     }
 
-    /// Browser chips worth drawing. One that only repeats the row's own name says
-    /// nothing: the extension sends the profile name the user typed into its options,
-    /// and that is usually what the row is already called.
-    func sourceBadges(rowLabel: String) -> [String] {
+    /// A badge claims a source is feeding this row, so it has to be able to expire.
+    /// Generous enough that a terminal left idle over lunch keeps its chip, short enough
+    /// that a profile renamed weeks ago stops claiming to be here.
+    static let sourceBadgeAge: TimeInterval = 3 * 3600
+
+    /// Chips worth drawing: sources that have observed something recently, minus any
+    /// that only repeat the row's own name. The extension sends the profile name the
+    /// user typed into its options, and that is usually what the row is already called,
+    /// so "Menn … Menn" was the common case.
+    func sourceBadges(rowLabel: String, at now: Date) -> [String] {
+        let names: [String]
+        if let seen = sourceSeen, !seen.isEmpty {
+            names = seen
+                .filter { now.timeIntervalSince($0.value) < Self.sourceBadgeAge }
+                .keys
+                // The local CLI first, then browsers alphabetically. Written as a tuple
+                // so the ordering stays strict — `$0 == "CLI"` alone is not.
+                .sorted { ($0 == "CLI" ? 0 : 1, $0) < ($1 == "CLI" ? 0 : 1, $1) }
+        } else {
+            // A row persisted before per-source times existed. Fall back to the old
+            // flags rather than blanking every badge until the next report arrives.
+            names = (sawCLI ? ["CLI"] : []) + browsers
+        }
         let row = rowLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-        return browsers.filter {
+        return names.filter {
             $0.trimmingCharacters(in: .whitespacesAndNewlines)
                 .caseInsensitiveCompare(row) != .orderedSame
         }
+    }
+
+    private mutating func noteSource(_ name: String, at when: Date) {
+        var seen = sourceSeen ?? [:]
+        seen[name] = max(seen[name] ?? .distantPast, when)
+        sourceSeen = seen
     }
 
     /// Merge a newly arrived report. Per-limit, newest observation wins; identity
@@ -252,11 +282,19 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         orgName     = r.orgName     ?? orgName
         plan        = r.plan        ?? plan
 
+        // What the badge claims is that this source is producing readings, so it is
+        // stamped with the newest observation in the report rather than with the moment
+        // the report arrived. A source re-delivering yesterday's numbers is not live.
+        let observed = r.limits.values.map(\.observedAt).max() ?? r.receivedAt
         if r.source == .cli {
             sawCLI = true
-        } else if let b = r.browser, !b.isEmpty, !browsers.contains(b) {
-            browsers.append(b)
-            browsers.sort()
+            noteSource("CLI", at: observed)
+        } else if let b = r.browser?.trimmingCharacters(in: .whitespacesAndNewlines), !b.isEmpty {
+            if !browsers.contains(b) {
+                browsers.append(b)
+                browsers.sort()
+            }
+            noteSource(b, at: observed)
         }
 
         for (rawKind, reading) in r.limits {
