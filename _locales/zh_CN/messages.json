@@ -1,4 +1,4 @@
-﻿{
+{
   "ext_name": {
     "message": "Claude 配额监控"
   },
@@ -95,9 +95,6 @@
   "weekly_all_models": {
     "message": "所有模型"
   },
-  "weekly_design": {
-    "message": "Claude Design"
-  },
   "time_days": {
     "message": "天"
   },
@@ -134,16 +131,10 @@
   "review_star_title": {
     "message": "在 Chrome 应用商店评分"
   },
-  "weekly_sonnet": {
-    "message": "仅 Sonnet"
-  },
   "extra_usage_label": {
     "message": "使用额度"
   },
   "extra_usage_limit": {
     "message": "上限"
-  },
-  "weekly_opus": {
-    "message": "仅 Opus"
   }
 }

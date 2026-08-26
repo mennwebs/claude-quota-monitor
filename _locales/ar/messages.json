@@ -1,4 +1,4 @@
-﻿{
+{
   "ext_name": {
     "message": "مراقب حصة Claude"
   },
@@ -95,9 +95,6 @@
   "weekly_all_models": {
     "message": "جميع النماذج"
   },
-  "weekly_design": {
-    "message": "Claude Design"
-  },
   "time_days": {
     "message": "ي"
   },
@@ -134,16 +131,10 @@
   "review_star_title": {
     "message": "التقييم على Chrome Web Store"
   },
-  "weekly_sonnet": {
-    "message": "Sonnet فقط"
-  },
   "extra_usage_label": {
     "message": "رصيد الاستخدام"
   },
   "extra_usage_limit": {
     "message": "حد"
-  },
-  "weekly_opus": {
-    "message": "Opus فقط"
   }
 }

@@ -4,6 +4,92 @@ All notable changes to Claude Quota Monitor are documented here.
 
 ---
 
+## [Unreleased] — macOS menu bar bridge
+
+### Added
+- `bridge.js` — pushes the reading this extension already has to a menu bar app listening on
+  `127.0.0.1`. Opt-in: with no token configured it makes no requests.
+- Options page for the bridge (port, token, profile name), reachable from the toolbar icon's
+  right-click menu.
+- A one-minute push alarm. It re-sends the cached value and never touches claude.ai, so the Mac
+  app is current within a minute of launching while request volume to claude.ai is unchanged.
+- The app can ask for a real refresh in its reply to a push — the only path from the Mac back
+  into the browser.
+- `mac/` — the menu bar app itself, in this repo because the two halves share the wire contract
+  in `docs/protocol.md`.
+- `tests/test-bridge.js` — checks over the payload builder and the alarm scheduling, loading
+  `bridge.js` and `background.js` themselves rather than copies, so they cannot drift.
+
+### Added
+- `--enable-login-item` / `--disable-login-item` / `--login-item-status` on the Mac app, next to
+  the statusline flags and for the same reason: "open at login" is a persistent change to the
+  machine, and being able to set and inspect it from a terminal makes it auditable. The GUI
+  toggle in ตั้งค่า → ทั่วไป is unchanged. `LoginItem` moved from `SettingsView.swift` to
+  `Support.swift` — the CLI needs it and it was never a view.
+
+### Fixed
+- **Mac panel showed no bars at all** — `ScrollView { … }.frame(maxHeight:)` reports almost no
+  ideal height when asked for one with no proposal, which is exactly what a `MenuBarExtra`
+  window does. The window sized itself to 68pt: header, footer, and every account squeezed out
+  of existence. `fixedSize(horizontal: false, vertical: true)` makes the scroll view report the
+  height its content wants, and the frame still caps it so long lists scroll.
+- **"ตั้งค่า…" did nothing** — two faults, one symptom.
+  `NSApp.sendAction(Selector(("showSettingsWindow:")))` returns `true` on macOS 26 and opens no
+  window in a menu-bar-only app, so it is now `SettingsLink`. But `SettingsLink` on its own
+  still looks broken: it gives the new window no focus, and the same click dismisses the panel,
+  which deactivates the app and leaves the window behind whatever was in front. `SettingsWindow`
+  watches for it and raises it — a `simultaneousGesture` on `SettingsLink` never fires, so the
+  click cannot be hooked. Raising is itself two things: the app becomes `.regular` while the
+  window is open, because an `.accessory` app does not win an activation contest, and the window
+  floats while it is open, because an app that re-activates itself a second later would
+  otherwise cover it. It reverts to a menu bar app on close.
+- **"เครื่องนี้: 0 tok · 0 ข้อความ"** — Claude Code recomputes `stats-cache.json` lazily, so
+  today's entry is regularly missing on a machine that has been busy since morning. The panel
+  and the settings pane now name the day the cache actually covers and show its figures instead
+  of a zero that reads as "you did nothing".
+
+### Changed
+- **Two columns.** Accounts sit side by side, so two of them take the height one used to. The
+  panel is only as wide as the columns it shows: one account keeps it narrow.
+- **Per-model weekly caps share one row.** They all reset together and there can be any number
+  of them, so the fullest model gets the bar and the label, the others are marks on the same
+  track plus one small line of figures. `Claude Design` displays as `Design`.
+- **Dark, in Claude's own colours**, whatever the Mac is set to — a translucent light popover
+  picks up whatever wallpaper is behind it. Near-black surface, raised cards, and a warm ramp
+  (sage → gold → terracotta → clay) with Claude's `#D97757` where a bar starts asking for
+  attention. Only the panel's window is switched: the menu bar glyph keeps system colours
+  because it has to match the real menu bar, and the settings window stays a normal Mac window.
+- Reset countdowns lost their wall-clock half to buy the width; it is a tooltip now.
+- `optional_host_permissions: http://127.0.0.1/*`. Optional on purpose: a plain install carries
+  no new permission, and Chrome only asks when the bridge is switched on.
+- The badge's binding-limit tracking follows 1.7.2's move to dynamic per-model categories
+  instead of naming Opus, so a new model is picked up without a code change.
+
+
+## [1.7.3] — 2026-07-31
+
+### Fixed
+- **Removed unnecessary `tabs` permission** — the Chrome Web Store flagged the `tabs` permission as excessive (policy "Purple Potassium"). The extension only uses `chrome.tabs.create({ url })`, which does not require the `tabs` permission (that permission is only needed to read sensitive tab properties like url/title of existing tabs). Removing it resolves the compliance warning with no loss of functionality.
+
+---
+
+## [1.7.2] — 2026-07-23
+
+### Added
+- **Fable weekly quota** — the new Fable model now appears as a weekly category
+- **Dynamic per-model categories** — weekly model breakdowns are now rendered dynamically from the API's new `limits` array, so any current or future model (Fable, Sonnet, Opus, Design, ...) shows up automatically with the name and reset time the API provides
+
+### Fixed
+- **Per-model bars broken by API change** — the API moved per-model quota from individual `seven_day_*` fields (now returning null) to a structured `limits` array with `weekly_scoped` entries; the extension now reads the new format, with a fallback to the legacy fields
+- **Wrong organization selected on multi-org accounts** — accounts with a separate API organization could have the extension pick the wrong org (`orgs[0]`); it now prefers the organization with the `chat` capability
+- **BOM in locale files** — messages.json files written during 1.7/1.7.1 packaging contained a UTF-8 BOM; removed for clean JSON parsing
+
+### Changed
+- `setBar()` simplified to preserve any `bar--*` color modifier generically instead of a hardcoded list
+- Removed now-unused locale keys `weekly_sonnet`, `weekly_opus`, `weekly_design` (per-model labels come from the API's `display_name`)
+
+---
+
 ## [1.7.1] — 2026-06-03
 
 ### Added

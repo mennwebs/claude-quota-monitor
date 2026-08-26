@@ -1,6 +1,9 @@
 {
   "scripts": {
-    "test": "node tests/run.js"
+    "test": "node tests/run.js",
+    "test:bridge": "node -e \"require('./tests/runner').run([require('./tests/test-bridge')])\"",
+    "test:mac": "cd mac && swift build && ./.build/debug/ClaudeQuota --selftest",
+    "build:mac": "./mac/scripts/build.sh"
   },
   "devDependencies": {
     "pngjs": "^7.0.0",

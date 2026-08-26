@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_ext_name__",
-  "version": "1.7.1",
+  "version": "1.7.3",
   "description": "__MSG_ext_description__",
   "default_locale": "en",
   "icons": {
@@ -11,8 +11,13 @@
   },
   "permissions": ["storage", "alarms"],
   "host_permissions": ["https://claude.ai/*"],
+  "optional_host_permissions": ["http://127.0.0.1/*"],
   "background": {
     "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
   },
   "action": {
     "default_popup": "popup.html",

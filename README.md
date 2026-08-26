@@ -28,9 +28,30 @@ The extension reads quota data from the `claude.ai/api/organizations/*/usage` en
 | Permission | Purpose |
 |---|---|
 | `storage` | Persist quota data between sessions |
-| `tabs` | Open claude.ai when clicking "View quota" |
-| `alarms` | Schedule background refresh every 10 minutes |
+| `alarms` | Schedule background refresh |
 | `host_permissions: claude.ai` | Read quota data from the Claude API |
+| `optional_host_permissions: 127.0.0.1` | Only if you turn on the macOS menu bar bridge. Requested at that point, never on install |
+
+## macOS menu bar bridge
+
+If you run several Claude accounts in several Chrome profiles, this fork can push each
+profile's reading to the macOS menu bar app in [`mac/`](mac/) — one bar per account, with reset
+times, and readings greyed out once they go stale.
+
+The app lives in this repo because the two halves share a wire contract
+([`docs/protocol.md`](docs/protocol.md)); changing it on one side without the other is the
+mistake worth making impossible. The extension stays at the repo root so merges from upstream
+keep applying cleanly.
+
+Right-click the toolbar icon → **Options**, tick *Send readings to the Mac app*, paste the
+token from the app, and press **Save & connect**. Repeat in every profile.
+
+It talks to `127.0.0.1` and nothing else. That host permission is **optional** — a plain install
+does not hold it, and Chrome only asks when you press Save & connect. With the bridge off,
+`bridge.js` makes no requests at all.
+
+Re-posting the cached reading is free on claude.ai's side, so the bridge pushes every minute
+while the quota fetch stays on its slow poll. Request volume to claude.ai is unchanged.
 
 ## Development
 
@@ -59,7 +80,13 @@ npm install
 npm test
 ```
 
-The test suite (25 tests) covers popup rendering, bar colors, i18n strings, and time formatting.
+The test suite covers popup rendering, bar colors, i18n strings, time formatting, and the
+bridge's payload builder. The bridge suite needs no browser:
+
+```bash
+npm run test:bridge   # bridge only, no browser needed
+npm run test:mac      # the Swift app's own checks
+```
 
 ## Project structure
 
@@ -67,12 +94,16 @@ The test suite (25 tests) covers popup rendering, bar colors, i18n strings, and 
 claude-quota-monitor/
 ├── manifest.json          # Extension manifest (MV3)
 ├── background.js          # Service worker — refresh scheduler, badge updates
+├── bridge.js              # macOS menu bar bridge — loopback push (opt-in)
+├── options.html/css/js    # Bridge settings
 ├── content.js             # Injected into claude.ai — captures quota from API
 ├── popup.html/css/js      # Extension popup UI
 ├── onboarding.html/css/js # First-install welcome page
 ├── icons/                 # Extension icons (16, 48, 128px)
 ├── _locales/              # i18n strings (10 languages)
-└── tests/                 # Automated test suite
+├── tests/                 # Automated test suite
+├── docs/protocol.md       # Wire contract between the extension and the Mac app
+└── mac/                   # macOS menu bar app (Swift, no dependencies)
 ```
 
 ## Changelog

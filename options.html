@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Claude Quota Monitor — Mac bridge</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="wrap">
+    <h1 data-i18n="bridge_title">Mac menu bar bridge</h1>
+    <p class="lede" data-i18n="bridge_intro">
+      Send this profile's quota to the Claude Quota menu bar app on this Mac. Nothing
+      leaves the machine — the app listens on 127.0.0.1 only.
+    </p>
+
+    <label class="row toggle">
+      <input type="checkbox" id="enabled">
+      <span data-i18n="bridge_enable">Send readings to the Mac app</span>
+    </label>
+
+    <div class="field">
+      <label for="port" data-i18n="bridge_port">Port</label>
+      <input type="number" id="port" min="1024" max="65535" step="1">
+    </div>
+
+    <div class="field">
+      <label for="token" data-i18n="bridge_token">Token</label>
+      <input type="password" id="token" autocomplete="off" spellcheck="false"
+             placeholder="paste from the app's Settings → General">
+      <button type="button" id="reveal" class="link" data-i18n="bridge_reveal">show</button>
+    </div>
+
+    <div class="field">
+      <label for="profile" data-i18n="bridge_profile">Profile name</label>
+      <input type="text" id="profile" maxlength="24" spellcheck="false"
+             placeholder="optional — e.g. work, personal">
+    </div>
+
+    <div class="actions">
+      <button type="button" id="save" class="primary" data-i18n="bridge_save">Save &amp; connect</button>
+      <button type="button" id="test" data-i18n="bridge_test">Test</button>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <p class="hint" data-i18n="bridge_hint">
+      Repeat this in every Chrome profile you want to see in the menu bar. Each profile
+      reports the account it is signed in as.
+    </p>
+  </div>
+  <script src="bridge.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
