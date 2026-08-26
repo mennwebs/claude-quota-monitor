@@ -169,6 +169,9 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
     var limits: [String: LimitReading] = [:]
     var extra: ExtraUsage?
     var firstSeen: Date = .distantPast
+    /// When a source last reported this account *at all*, whatever the reading said.
+    /// Optional so that a state file written before contact was tracked still decodes.
+    var lastContactAt: Date?
 
     var id: String { key }
 
@@ -208,10 +211,41 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         return Freshness.of(now.timeIntervalSince(o), thresholds: thresholds)
     }
 
+    /// The extension re-posts its cached reading every minute even when nothing has
+    /// changed, so a gap this long means the channel has stopped rather than that the
+    /// poll is slow — the one thing the panel previously could not say.
+    ///
+    /// Deliberately not a field of `FreshnessThresholds`: Swift's synthesized
+    /// `Decodable` ignores default values, so a new stored property there would make
+    /// every settings file written before it fail to decode, and `AppSettings.load()`
+    /// answers a failed decode with defaults — silently discarding the user's labels.
+    static let quietAfter: TimeInterval = 5 * 60
+
+    /// How long since anything reported this account, or nil while it is still being
+    /// heard from. `observedAt` stands in for rows persisted before contact was tracked;
+    /// it can only over-state a gap, never hide one.
+    func quietFor(at now: Date) -> TimeInterval? {
+        guard let last = lastContactAt ?? observedAt else { return nil }
+        let gap = now.timeIntervalSince(last)
+        return gap >= Self.quietAfter ? gap : nil
+    }
+
+    /// Browser chips worth drawing. One that only repeats the row's own name says
+    /// nothing: the extension sends the profile name the user typed into its options,
+    /// and that is usually what the row is already called.
+    func sourceBadges(rowLabel: String) -> [String] {
+        let row = rowLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        return browsers.filter {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                .caseInsensitiveCompare(row) != .orderedSame
+        }
+    }
+
     /// Merge a newly arrived report. Per-limit, newest observation wins; identity
     /// fields fill in whatever the other source did not know.
     mutating func absorb(_ r: IncomingReport) {
         if firstSeen == .distantPast { firstSeen = r.receivedAt }
+        lastContactAt = max(lastContactAt ?? .distantPast, r.receivedAt)
         accountUuid = r.accountUuid ?? accountUuid
         email       = r.email       ?? email
         orgId       = r.orgId       ?? orgId
@@ -229,9 +263,33 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
             if let existing = limits[rawKind], existing.observedAt > reading.observedAt { continue }
             limits[rawKind] = reading
         }
+        retireModelCaps(missingFrom: r)
 
         if let e = r.extra, extra.map({ $0.observedAt <= e.observedAt }) ?? true {
             extra = e
+        }
+    }
+
+    /// A model cap the API has stopped listing is dropped once it is this old. Long
+    /// enough that one hiccuped report cannot erase a reading that is still live, short
+    /// enough that a retired cap does not keep its place on the card all day.
+    static let retiredModelCapAge: TimeInterval = 3 * 3600
+
+    /// Per-model caps arrive as a list, so a model the API drops does not come back as
+    /// zero — it simply stops appearing, and nothing overwrites the last reading. Left
+    /// alone, an Opus bar from yesterday keeps its row next to today's numbers and reads
+    /// as one of them.
+    ///
+    /// Only an extension report may retire them: the status line never carries model
+    /// caps at all, so its silence about Opus is not evidence that Opus is gone.
+    private mutating func retireModelCaps(missingFrom r: IncomingReport) {
+        guard r.source == .ext else { return }
+        let cutoff = r.receivedAt.addingTimeInterval(-Self.retiredModelCapAge)
+        limits = limits.filter { id, reading in
+            guard id.hasPrefix(LimitID.weeklyPrefix), reading.source == .ext,
+                  r.limits[id] == nil
+            else { return true }
+            return reading.observedAt > cutoff
         }
     }
 }

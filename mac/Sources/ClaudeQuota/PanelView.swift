@@ -68,11 +68,7 @@ struct PanelView: View {
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(Theme.ink)
             Spacer()
-            if let last = store.lastUpdate {
-                Text(Fmt.ago(last, now: store.now))
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(Theme.inkFaint)
-            }
+            freshnessNote
             Button {
                 store.requestRefresh()
             } label: {
@@ -85,6 +81,23 @@ struct PanelView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// Two different facts, and only one of them used to be sayable: how old the newest
+    /// reading is, and whether anything is still reporting. When they disagree the
+    /// silence is the one that matters — nothing arriving is a problem to go and fix,
+    /// while an old number on a live channel usually just means an idle afternoon.
+    @ViewBuilder private var freshnessNote: some View {
+        if let gap = store.quietFor {
+            Text(Fmt.quiet(gap))
+                .font(.system(size: 9.5))
+                .foregroundStyle(Theme.warning)
+                .help("ไม่มีรายงานเข้ามา \(Fmt.gap(gap)) — เบราว์เซอร์อาจปิดอยู่ หรือ extension ยังไม่ได้ reload หลังอัปเดตไฟล์")
+        } else if let last = store.lastUpdate {
+            Text(Fmt.ago(last, now: store.now))
+                .font(.system(size: 9.5))
+                .foregroundStyle(Theme.inkFaint)
+        }
     }
 
     // MARK: - Empty state
@@ -164,12 +177,14 @@ struct AccountCard: View {
         account.freshness(at: now, thresholds: store.settings.thresholds)
     }
 
+    /// Nil while this row is still being reported. Held once per body so the dot and
+    /// the header text cannot disagree about it.
+    private var quiet: TimeInterval? { account.quietFor(at: now) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 5) {
-                Circle()
-                    .fill(freshness >= .stale ? Theme.inkFaint : Theme.color(for: 0))
-                    .frame(width: 5, height: 5)
+                statusDot
 
                 Text(store.label(for: account))
                     .font(.system(size: 11.5, weight: .semibold))
@@ -186,15 +201,23 @@ struct AccountCard: View {
 
                 Spacer(minLength: 3)
 
-                // Only worth saying once the number has aged enough to distrust.
-                if freshness >= .stale, let observed = account.observedAt {
+                // A row that has stopped reporting says so first: its numbers may still
+                // be minutes old and perfectly plausible, which is what made the state
+                // invisible. Only past that does the reading's own age get the space.
+                if let quiet {
+                    Text(Fmt.quiet(quiet))
+                        .font(.system(size: 8.5))
+                        .foregroundStyle(Theme.warning)
+                        .lineLimit(1)
+                        .help("โปรไฟล์นี้ไม่ได้ส่งรายงานมา \(Fmt.gap(quiet)) — ตัวเลขที่เห็นคือของครั้งล่าสุด")
+                } else if freshness >= .stale, let observed = account.observedAt {
                     Text(Fmt.ago(observed, now: now))
                         .font(.system(size: 8.5))
                         .foregroundStyle(Theme.inkFaint)
                         .lineLimit(1)
                         .help("อ่านล่าสุด \(Fmt.ago(observed, now: now))")
                 } else {
-                    SourceBadges(account: account)
+                    SourceBadges(account: account, label: store.label(for: account))
                 }
             }
             .padding(.bottom, 1)
@@ -217,15 +240,32 @@ struct AccountCard: View {
         .frame(width: Theme.cardWidth, alignment: .topLeading)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
+
+    /// Filled while something is reporting, hollow once nothing is. The old dot tracked
+    /// only the age of the numbers, which is why a channel that had died looked exactly
+    /// like one that simply had nothing new to say.
+    @ViewBuilder private var statusDot: some View {
+        if quiet != nil {
+            Circle()
+                .strokeBorder(Theme.warning.opacity(0.8), lineWidth: 1)
+                .frame(width: 5, height: 5)
+        } else {
+            Circle()
+                .fill(freshness >= .stale ? Theme.inkFaint : Theme.color(for: 0))
+                .frame(width: 5, height: 5)
+        }
+    }
 }
 
 private struct SourceBadges: View {
     let account: AccountSnapshot
+    /// The row's own name, so a badge cannot just repeat it. See `sourceBadges(rowLabel:)`.
+    let label: String
 
     var body: some View {
         HStack(spacing: 3) {
             if account.sawCLI { badge("CLI") }
-            ForEach(account.browsers.prefix(2), id: \.self) { badge($0) }
+            ForEach(account.sourceBadges(rowLabel: label).prefix(2), id: \.self) { badge($0) }
         }
     }
 

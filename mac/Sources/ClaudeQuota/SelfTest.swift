@@ -199,6 +199,119 @@ enum SelfTest {
         check("a label-less model falls back to its slug", limit("weekly:fable", nil).short == "Fable")
         check("the session sorts first", limit(LimitID.fiveHour, nil).rank < limit("weekly:opus", "Opus").rank)
 
+        print("\n▸ Contact — a dead channel is not the same as an old number")
+        let t0 = Date(timeIntervalSince1970: 1_787_700_000)
+        func reading(_ pct: Double, _ at: Date, _ src: ReadingSource = .ext,
+                     label: String? = nil) -> LimitReading {
+            LimitReading(pct: pct, resetsAt: nil, observedAt: at, source: src, label: label)
+        }
+        func extReport(_ limits: [String: LimitReading], at: Date) -> IncomingReport {
+            IncomingReport(source: .ext, limits: limits, receivedAt: at)
+        }
+
+        var acct = AccountSnapshot(key: "acct:1")
+        acct.absorb(extReport([LimitID.fiveHour: reading(10, t0)], at: t0))
+        check("a report stamps contact", acct.lastContactAt == t0)
+        check("a minute later is not silence", acct.quietFor(at: t0.addingTimeInterval(60)) == nil)
+        check("six minutes is", (acct.quietFor(at: t0.addingTimeInterval(6 * 60)) ?? 0) >= 5 * 60)
+        check("a later report clears it", {
+            var a = acct
+            let then = t0.addingTimeInterval(600)
+            a.absorb(extReport([LimitID.fiveHour: reading(10, then)], at: then))
+            return a.quietFor(at: then.addingTimeInterval(60)) == nil
+        }())
+        check("a report that arrives out of order cannot rewind contact", {
+            var a = acct
+            a.absorb(extReport([LimitID.fiveHour: reading(9, t0)], at: t0.addingTimeInterval(-3600)))
+            return a.lastContactAt == t0
+        }())
+        // Rows persisted before contact was tracked still have to be judged, and the
+        // reading's own age is the only evidence they carry.
+        var legacyRow = AccountSnapshot(key: "acct:legacy")
+        legacyRow.limits[LimitID.fiveHour] = reading(5, t0)
+        check("with no contact recorded the reading's age stands in",
+              (legacyRow.quietFor(at: t0.addingTimeInterval(3600)) ?? 0) >= 3600)
+
+        print("\n▸ Model caps the API has stopped listing")
+        // Exactly the Seed card: the weekly list came back carrying Fable only, and
+        // nothing was ever going to overwrite yesterday's Opus and Design readings.
+        let thirteenHoursAgo = t0.addingTimeInterval(-13 * 3600)
+        var retired = AccountSnapshot(key: "acct:seed")
+        retired.limits = [
+            LimitID.fiveHour: reading(23, thirteenHoursAgo),
+            LimitID.sevenDay: reading(26, thirteenHoursAgo),
+            "weekly:opus": reading(61, thirteenHoursAgo, label: "Opus"),
+            "weekly:claude-design": reading(7, thirteenHoursAgo, label: "Claude Design"),
+            "weekly:fable": reading(0, thirteenHoursAgo, label: "Fable")
+        ]
+        retired.absorb(extReport([
+            LimitID.fiveHour: reading(23, t0),
+            LimitID.sevenDay: reading(26, t0),
+            "weekly:fable": reading(0, t0, label: "Fable")
+        ], at: t0))
+        check("a cap the report no longer carries is dropped", retired.limits["weekly:opus"] == nil)
+        check("all of them, not just the first", retired.limits["weekly:claude-design"] == nil)
+        check("the cap still being reported stays", retired.limits["weekly:fable"] != nil)
+        check("the two structural ceilings are never candidates",
+              retired.limits[LimitID.fiveHour] != nil && retired.limits[LimitID.sevenDay] != nil)
+
+        var live = AccountSnapshot(key: "acct:live")
+        live.limits = ["weekly:opus": reading(61, t0.addingTimeInterval(-120), label: "Opus"),
+                       LimitID.fiveHour: reading(1, t0.addingTimeInterval(-120))]
+        live.absorb(extReport([LimitID.fiveHour: reading(1, t0)], at: t0))
+        check("one short report cannot erase a reading that is still live",
+              live.limits["weekly:opus"] != nil)
+
+        var viaCLI = AccountSnapshot(key: "acct:cli")
+        viaCLI.limits = ["weekly:opus": reading(61, thirteenHoursAgo, label: "Opus")]
+        viaCLI.absorb(IncomingReport(source: .cli,
+                                     limits: [LimitID.fiveHour: reading(4, t0, .cli)],
+                                     receivedAt: t0))
+        check("the status line carries no caps, so its silence retires nothing",
+              viaCLI.limits["weekly:opus"] != nil)
+
+        print("\n▸ Source badges")
+        var badged = AccountSnapshot(key: "acct:badges")
+        badged.browsers = ["Chrome", "Seed"]
+        check("a badge that only repeats the row name goes",
+              badged.sourceBadges(rowLabel: "Seed") == ["Chrome"])
+        check("case and padding do not save it",
+              badged.sourceBadges(rowLabel: "  seed ") == ["Chrome"])
+        check("one that says something new is kept",
+              badged.sourceBadges(rowLabel: "Menn") == ["Chrome", "Seed"])
+        var solo = AccountSnapshot(key: "acct:solo")
+        solo.browsers = ["Novem"]
+        check("and the only badge may go entirely", solo.sourceBadges(rowLabel: "Novem").isEmpty)
+
+        print("\n▸ Persistence — a file from an earlier build must survive")
+        // `AppSettings.load()` answers a failed decode with defaults, and Swift's
+        // synthesized `Decodable` ignores property defaults: one new stored field in
+        // `FreshnessThresholds` would take every label the user has typed with it.
+        let earlierSettings = """
+        {"hidden":[],"labels":{"acct:1":"Menn"},"order":[],"port":47821,
+         "readCLIStatusline":true,"readStatsCache":true,"showPercentInMenuBar":true,
+         "thresholds":{"aging":1800,"fresh":180,"stale":10800}}
+        """
+        if let s = try? JSONIO.decoder.decode(AppSettings.self, from: Data(earlierSettings.utf8)) {
+            check("settings still decode", s.labels["acct:1"] == "Menn")
+            check("and keep the chosen port", s.port == 47821)
+        } else { failed += 1; print("  ✗  a settings file from an earlier build no longer decodes") }
+
+        let earlierAccount = """
+        {"key":"acct:1","browsers":["Menn"],"sawCLI":true,"firstSeen":1787600000,
+         "limits":{"five_hour":{"pct":5,"observedAt":1787700000,"source":"extension"}}}
+        """
+        if let a = try? JSONIO.decoder.decode(AccountSnapshot.self, from: Data(earlierAccount.utf8)) {
+            check("a state file with no contact field decodes", a.lastContactAt == nil)
+            check("and its readings come back", a.limits[LimitID.fiveHour]?.pct == 5)
+        } else { failed += 1; print("  ✗  a state file from an earlier build no longer decodes") }
+
+        print("\n▸ Fmt — a silence is worded as one")
+        check("minutes", Fmt.gap(41 * 60) == "41 นาที")
+        check("hours", Fmt.gap(2 * 3600 + 300) == "2 ชม.")
+        check("days", Fmt.gap(3 * 86400) == "3 วัน")
+        check("not phrased as an age", Fmt.quiet(41 * 60) == "เงียบ 41 นาที")
+
         print("\n\(passed) passed, \(failed) failed\n")
         return failed == 0 ? 0 : 1
     }

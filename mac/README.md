@@ -60,6 +60,18 @@ Opus figure quietly goes hours old. Each row is dimmed on its own clock.
 | Older | grey bar, "อ่านล่าสุด 5 ชม.ที่แล้ว" |
 | Past its `resets_at` | empty dashed bar, "รีเซ็ตแล้ว · รอใช้ครั้งถัดไป" |
 | Never reported | hollow outline, not `0%` |
+| Nothing reporting for 5 min | hollow gold dot, "เงียบ 41 นาที" on the row and in the header |
+
+That last row is a different claim from the ones above it, and the panel used to be unable to
+make it. "This number is 40 minutes old" and "nothing has reported for 40 minutes" look
+identical when the only thing tracked is the age of the reading — so a browser whose service
+worker had died rendered exactly like a quiet afternoon. Contact is now recorded separately from
+observation, and when the two disagree the silence is what gets the space.
+
+A per-model ceiling that the API stops listing is retired once it is three hours old. The caps
+arrive as a list, so a model that goes away does not come back as zero — it simply stops
+appearing, and nothing would ever overwrite the last reading. The three-hour floor is there so a
+single short report cannot erase a figure that is still live.
 
 After a 5-hour window resets, the next reset time is genuinely unknowable — the window starts
 on your next message, not on a schedule. It says so instead of inventing a countdown.
@@ -131,7 +143,7 @@ is kept. `--uninstall-statusline` puts it back byte for byte.
 --login-item-status      report whether it opens at login
 --print-token            print the loopback token
 --print-port             print the port
---selftest               run the settings.json patcher checks
+--selftest               run the built-in checks
 ```
 
 ## Files
@@ -151,6 +163,20 @@ request bodies at 256 KB, and requires the token on the one route that writes.
 
 **Menu bar shows a hollow outline** — nothing has reported yet. Open the extension's Options and
 press **Test**; it distinguishes "app not running" from "wrong token" from "no reading yet".
+
+**Rows say "เงียบ" while the browser is open** — the extension is loaded unpacked, and Chromium
+does not watch its files. Page and content scripts are re-read from disk on demand, but the
+**service worker is only replaced when the extension is reloaded** — the Reload button on
+`chrome://extensions`, or a browser restart. Edit `background.js` while the browser is running
+and it keeps executing the copy it registered, which may predate the bridge entirely: the quota
+still updates in the popup, and nothing is ever pushed here. Reload the extension in every
+profile after pulling. To confirm the push alarm is actually registered:
+
+```bash
+grep -rac mac-push ~/Library/Application\ Support/<Browser>/*/Extension\ State/ 2>/dev/null
+```
+
+Zero everywhere means the worker running is older than the bridge.
 
 **"พอร์ตถูกใช้อยู่แล้ว"** — change the port in ตั้งค่า → ทั่วไป, then change it in each profile's
 Options to match.

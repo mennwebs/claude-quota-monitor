@@ -167,6 +167,19 @@ enum Fmt {
         return "\(h / 24) วันที่แล้ว"
     }
 
+    /// Bare duration: "41 นาที", "2 ชม.", "3 วัน".
+    static func gap(_ seconds: TimeInterval) -> String {
+        let m = max(0, Int(seconds) / 60)
+        if m < 60 { return "\(m) นาที" }
+        let h = m / 60
+        return h < 24 ? "\(h) ชม." : "\(h / 24) วัน"
+    }
+
+    /// A silence, not an age. "ไม่มีรายงานมา 41 นาที" is a different claim from "ค่านี้
+    /// อ่านไว้ 41 นาทีก่อน", and the panel has to be able to make both — the first is
+    /// what it could not say before.
+    static func quiet(_ seconds: TimeInterval) -> String { "เงียบ \(gap(seconds))" }
+
     static func tokens(_ n: Int) -> String {
         if n >= 1_000_000_000 { return String(format: "%.1fB", Double(n) / 1e9) }
         if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1e6) }
