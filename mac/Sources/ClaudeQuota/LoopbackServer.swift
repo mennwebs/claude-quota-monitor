@@ -104,7 +104,7 @@ final class LoopbackServer {
 
     private static func describe(_ error: Error, port: UInt16) -> String {
         if let e = error as? NWError, case .posix(let code) = e, code == .EADDRINUSE {
-            return "พอร์ต \(port) ถูกใช้อยู่แล้ว — เปลี่ยนพอร์ตในหน้าตั้งค่า"
+            return "พอร์ต \(port) ถูกใช้อยู่แล้ว เปลี่ยนเป็นพอร์ตอื่นในหน้าตั้งค่า"
         }
         return "\(error.localizedDescription) (พอร์ต \(port))"
     }

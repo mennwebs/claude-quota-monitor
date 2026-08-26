@@ -77,7 +77,7 @@ struct PanelView: View {
                     .foregroundStyle(Theme.inkMuted)
             }
             .buttonStyle(.borderless)
-            .help("ขอให้เบราว์เซอร์ดึงค่าใหม่ในการเช็คอินรอบถัดไป (ไม่เกิน 1 นาที)")
+            .help("ขอให้เบราว์เซอร์ดึงค่าใหม่ตอนเช็คอินรอบหน้า (ไม่เกิน 1 นาที)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -92,7 +92,7 @@ struct PanelView: View {
             Text(Fmt.quiet(gap))
                 .font(.system(size: 9.5))
                 .foregroundStyle(Theme.warning)
-                .help("ไม่มีรายงานเข้ามา \(Fmt.gap(gap)) — เบราว์เซอร์อาจปิดอยู่ หรือ extension ยังไม่ได้ reload หลังอัปเดตไฟล์")
+                .help("ไม่มีรายงานเข้ามา \(Fmt.gap(gap)) · เบราว์เซอร์อาจปิดอยู่ หรือ extension ยังไม่ได้ reload หลังอัปเดตไฟล์")
         } else if let last = store.lastUpdate {
             Text(Fmt.ago(last, now: store.now))
                 .font(.system(size: 9.5))
@@ -119,7 +119,7 @@ struct PanelView: View {
     private var statusHint: String {
         switch store.serverState {
         case .listening(let port):
-            return "กำลังรออยู่ที่ 127.0.0.1:\(port) — ใส่ token ในหน้าตั้งค่าของ extension ในแต่ละโปรไฟล์ Chrome"
+            return "ใส่ token ในหน้าตั้งค่าของ extension ในแต่ละโปรไฟล์ · รออยู่ที่ 127.0.0.1:\(port)"
         case .failed(let message):
             return "เปิดพอร์ตไม่ได้: \(message)"
         case .stopped:
@@ -209,7 +209,7 @@ struct AccountCard: View {
                         .font(.system(size: 8.5))
                         .foregroundStyle(Theme.warning)
                         .lineLimit(1)
-                        .help("โปรไฟล์นี้ไม่ได้ส่งรายงานมา \(Fmt.gap(quiet)) — ตัวเลขที่เห็นคือของครั้งล่าสุด")
+                        .help("โปรไฟล์นี้ไม่ได้ส่งรายงานมา \(Fmt.gap(quiet))")
                 } else if freshness >= .stale, let observed = account.observedAt {
                     Text(Fmt.ago(observed, now: now))
                         .font(.system(size: 8.5))
