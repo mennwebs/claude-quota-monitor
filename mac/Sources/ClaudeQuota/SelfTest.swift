@@ -383,6 +383,62 @@ enum SelfTest {
         check("89 is not", Theme.color(for: 89) == Theme.brand)
         check("and the panel keeps its own half-way step", Theme.color(for: 49) != Theme.warning)
 
+        print("\n▸ Matching — a report that cannot name its account")
+        // What actually happened: claude.ai stopped answering the extension's identity
+        // lookup, the lookup overwrote the cached uuid with an org, and three accounts
+        // that already had rows came back as three more — named after the tail of an
+        // organization uuid, holding the same numbers, and impossible to merge away.
+        func anon(org: String, browser: String) -> IncomingReport {
+            IncomingReport(source: .ext, browser: browser, orgId: org,
+                           limits: [LimitID.fiveHour: reading(3, t0)], receivedAt: t0)
+        }
+        func named(_ key: String, uuid: String?, org: String, browsers: [String]) -> AccountSnapshot {
+            var a = AccountSnapshot(key: key)
+            a.accountUuid = uuid
+            a.orgId = org
+            a.browsers = browsers
+            return a
+        }
+
+        // Two accounts, one Team organization, one Chrome profile each — the case that
+        // stops orgId from being an identity, and the reason the profile name is needed.
+        let team = [named("acct:a", uuid: "u-a", org: "org-7", browsers: ["7Sol"]),
+                    named("acct:b", uuid: "u-b", org: "org-7", browsers: ["Novem"])]
+        check("an anonymous report goes to the row its profile already feeds",
+              AccountMatch.index(of: anon(org: "org-7", browser: "7Sol"), in: team) == 0)
+        check("and not to the other account in the same organization",
+              AccountMatch.index(of: anon(org: "org-7", browser: "Novem"), in: team) == 1)
+        check("a profile nobody has seen still gets a row of its own",
+              AccountMatch.index(of: anon(org: "org-7", browser: "Raven"), in: team) == nil)
+        check("a profile of the same name in another organization is not the same account",
+              AccountMatch.index(of: anon(org: "org-9", browser: "7Sol"), in: team) == nil)
+
+        // The state as it stood: the named row and the leftover both carry the profile.
+        let leftover = team + [named("org:org-7", uuid: nil, org: "org-7", browsers: ["7Sol", "Novem"])]
+        check("a row that knows whose account it is wins over one that does not",
+              AccountMatch.index(of: anon(org: "org-7", browser: "7Sol"), in: leftover) == 0)
+        check("so the leftover stops being fed and is retired",
+              AccountMatch.redundantAnonymousKeys(in: leftover) == ["org:org-7"])
+        check("a report that names the account still matches on the uuid, not the profile",
+              AccountMatch.index(of: IncomingReport(source: .ext, browser: "Novem", accountUuid: "u-a",
+                                                    limits: [:], receivedAt: t0), in: leftover) == 0)
+
+        // The proviso: an organization can hold an account nothing has ever identified.
+        let unclaimed = [named("acct:a", uuid: "u-a", org: "org-7", browsers: ["7Sol"]),
+                         named("org:org-7", uuid: nil, org: "org-7", browsers: ["7Sol", "Raven"])]
+        check("a row with a source no named row covers is kept",
+              AccountMatch.redundantAnonymousKeys(in: unclaimed).isEmpty)
+        check("and keeps receiving, because two rows claim its profile",
+              AccountMatch.index(of: anon(org: "org-7", browser: "7Sol"), in: unclaimed) == 0)
+        check("nothing is retired when no row is named at all",
+              AccountMatch.redundantAnonymousKeys(in: [named("org:org-7", uuid: nil, org: "org-7",
+                                                             browsers: ["7Sol"])]).isEmpty)
+        check("a CLI-only row carries no browser and is never a candidate",
+              AccountMatch.redundantAnonymousKeys(in: [
+                  named("acct:a", uuid: "u-a", org: "org-7", browsers: ["7Sol"]),
+                  named("org:org-7", uuid: nil, org: "org-7", browsers: [])
+              ]).isEmpty)
+
         print("\n▸ Persistence — a file from an earlier build must survive")
         // `AppSettings.load()` answers a failed decode with defaults, and Swift's
         // synthesized `Decodable` ignores property defaults: one new stored field in

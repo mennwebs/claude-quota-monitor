@@ -85,6 +85,11 @@ final class Store: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
+        // State on disk can predate the matching rules above. Fold it before the panel is
+        // ever drawn, rather than leaving duplicates on screen until the first report.
+        collapseDuplicates()
+        sortAccounts()
+        schedulePersist()
         server.start(port: settings.port, token: token)
         local.configure(statusline: settings.readCLIStatusline, stats: settings.readStatsCache)
         local.start()
@@ -116,20 +121,10 @@ final class Store: ObservableObject {
         schedulePersist()
     }
 
-    /// Match on the strongest identifier the report carries. The extension and the
-    /// statusline shim describe the same account from different angles — one knows the
-    /// org, the other the OAuth account — so matching has to work from any of them or
-    /// the same quota shows up as two rows.
+    /// Which row this report belongs to; the rules themselves are in `AccountMatch`,
+    /// where they can be checked without a store behind them.
     private func matchIndex(for r: IncomingReport) -> Int? {
-        if let u = r.accountUuid, let i = accounts.firstIndex(where: { $0.accountUuid == u }) { return i }
-        if let e = r.email, let i = accounts.firstIndex(where: { $0.email == e }) { return i }
-        // Only when *neither* side names an account. Several accounts can belong to one
-        // Team organization, so an org match between a report that knows its uuid and a
-        // row that does not is not evidence they are the same person.
-        if let o = r.orgId, r.accountUuid == nil,
-           let i = accounts.firstIndex(where: { $0.orgId == o && $0.accountUuid == nil }) { return i }
-        if let k = r.preferredKey, let i = accounts.firstIndex(where: { $0.key == k }) { return i }
-        return nil
+        AccountMatch.index(of: r, in: accounts)
     }
 
     private func appendNew(from r: IncomingReport) -> Int {
@@ -153,6 +148,25 @@ final class Store: ObservableObject {
             }
             i += 1
         }
+        dropRedundantAnonymousRows()
+    }
+
+    /// Retire a row that only ever existed because a report could not name its account.
+    /// Those reports now land on the profile's real row, so the leftover holds nothing
+    /// that is not already there — see `AccountMatch.redundantAnonymousKeys`.
+    private func dropRedundantAnonymousRows() {
+        let doomed = Set(AccountMatch.redundantAnonymousKeys(in: accounts))
+        guard !doomed.isEmpty else { return }
+        accounts.removeAll { doomed.contains($0.key) }
+
+        // One assignment, not one per key: `settings` saves itself on every write.
+        var next = settings
+        for key in doomed {
+            next.labels.removeValue(forKey: key)
+            next.hidden.remove(key)
+        }
+        next.order.removeAll { doomed.contains($0) }
+        if next != settings { settings = next }
     }
 
     private func sameAccount(_ a: AccountSnapshot, _ b: AccountSnapshot) -> Bool {

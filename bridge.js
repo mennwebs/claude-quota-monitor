@@ -205,14 +205,48 @@
     return { orgId, orgName: org?.name ?? null };
   }
 
+  /** Drops empty fields, so a lookup that answered nothing cannot erase a known one. */
+  function known(obj) {
+    const out = {};
+    for (const [k, v] of Object.entries(obj || {})) {
+      if (v !== null && v !== undefined && v !== '') out[k] = v;
+    }
+    return out;
+  }
+
+  /**
+   * What survives a probe that came back empty: the identity we last resolved, but only
+   * while it still belongs to the organization being asked about. A profile signed into
+   * a different account starts clean rather than inheriting the previous one's uuid.
+   */
+  function carryOver(cached, orgId) {
+    if (!cached) return {};
+    if (orgId && cached.orgId && cached.orgId !== orgId) return {};
+    return known({
+      uuid: cached.uuid, email: cached.email,
+      orgId: cached.orgId, orgName: cached.orgName
+    });
+  }
+
   /** Identity changes only on logout, so a complete one is cached for a day. */
   async function getAccount(orgId, { force = false } = {}) {
     const cached = (await chrome.storage.local.get(ACCOUNT_KEY))[ACCOUNT_KEY];
     if (!force && isCacheUsable(cached, orgId)) return cached;
 
-    const account = (await probeAccount()) || {};
-    const org = (await probeOrg(orgId)) || {};
-    const merged = { ...account, ...org, ts: Date.now() };
+    const account = known(await probeAccount());
+    const org = known(await probeOrg(orgId));
+
+    // A probe that answered nothing is a request that failed, not a logout — the account
+    // endpoints have moved before and will again. Dropping the uuid here files the profile
+    // under its *organization* instead, and the app cannot tell that row from a genuine
+    // second account in the same Team org: one failed probe becomes a duplicate card that
+    // never goes away. Carry the last identity across the gap instead.
+    const resolved = !!(account.uuid || account.email);
+    const merged = {
+      ...carryOver(cached, org.orgId ?? orgId), ...account, ...org,
+      resolved, ts: Date.now()
+    };
+
     if (merged.uuid || merged.email || merged.orgId) {
       await chrome.storage.local.set({ [ACCOUNT_KEY]: merged });
       return merged;
@@ -228,7 +262,10 @@
   function isCacheUsable(cached, orgId) {
     if (!cached) return false;
     if (orgId && cached.orgId !== orgId) return false;
-    const complete = !!(cached.uuid || cached.email);
+    // `resolved === false` marks an identity that was carried over from an earlier probe
+    // rather than confirmed by the last one. It is good enough to report with — that is
+    // the whole point of carrying it — but the probe is still worth retrying today.
+    const complete = !!(cached.uuid || cached.email) && cached.resolved !== false;
     return Date.now() - (cached.ts || 0) < (complete ? ACCOUNT_TTL_MS : ACCOUNT_RETRY_MS);
   }
 
@@ -293,7 +330,7 @@
 
   root.CQMBridge = {
     DEFAULTS, LOOPBACK_ORIGIN, CONFIG_KEY, STATUS_KEY, ACCOUNT_KEY,
-    toEpochSeconds, detectBrowser, buildPayload, isCacheUsable, slugModel, weeklyCategories,
+    toEpochSeconds, detectBrowser, buildPayload, isCacheUsable, carryOver, slugModel, weeklyCategories,
     getConfig, setConfig, getAccount,
     hasLoopbackPermission, requestLoopbackPermission,
     pushToMac, checkHealth
