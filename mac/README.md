@@ -264,6 +264,14 @@ Options to match.
 **Two rows for one account** — they merge as soon as a report arrives carrying both identifiers.
 If they persist, delete one in ตั้งค่า → บัญชี; it comes back correctly on the next report.
 
+The version of this that took a while to see: a row named after eight hex digits, next to a row
+with a name, holding the same numbers. That is an account the extension stopped being able to
+identify — claude.ai answered its usage endpoint but not its account lookup — so the reading
+arrived carrying only an organization and was filed under one. Reports like that now go to the
+row their browser profile is already feeding, and the leftover is retired once every profile
+feeding it also feeds a named row in the same organization. Nothing is retired on the strength
+of the organization alone: an org can hold several accounts.
+
 ## Where things are
 
 This is one half of a two-part tool. The Chrome extension is at the repo root; the wire contract

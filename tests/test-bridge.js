@@ -59,6 +59,35 @@ function loadBackground(existingAlarms) {
   return created;
 }
 
+/**
+ * Loads bridge.js with a `chrome` and a `fetch` the test drives, so the identity cache
+ * can be exercised the way it actually runs. `routes` maps a claude.ai path to what the
+ * request answers with; anything not listed comes back as a failed request, which is the
+ * case the cache used to handle by throwing away what it already knew.
+ */
+function loadBridgeWithChrome({ store = {}, routes = {} } = {}) {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  sandbox.self = sandbox;
+  sandbox.globalThis = sandbox;
+  sandbox.fetch = async (url) => {
+    const body = routes[String(url).replace('https://claude.ai', '')];
+    if (body === undefined) return { ok: false, json: async () => ({}) };
+    return { ok: true, json: async () => body };
+  };
+  sandbox.chrome = {
+    storage: {
+      local: {
+        async get(key) { return key in store ? { [key]: store[key] } : {}; },
+        async set(patch) { Object.assign(store, patch); }
+      }
+    },
+    permissions: { async contains() { return true; } }
+  };
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'bridge.js'), 'utf8'), sandbox);
+  return { B: sandbox.CQMBridge, store };
+}
+
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 module.exports = async function (describe) {
@@ -182,6 +211,69 @@ module.exports = async function (describe) {
       'an org-only identity is a failed probe and is retried within the hour');
     assert(B.isCacheUsable({ ...orgOnly, ts: now - 60e3 }, 'o1') === true,
       'but not retried on every single push');
+
+    const carried = { uuid: 'u', orgId: 'o1', resolved: false, ts: now - 40 * 60e3 };
+    assert(B.isCacheUsable(carried, 'o1') === false,
+      'an identity carried across a failed probe is re-probed within the hour');
+    assert(B.isCacheUsable({ ...carried, ts: now - 60e3 }, 'o1') === true,
+      'and is reported with in the meantime rather than dropped');
+    assert(B.isCacheUsable({ ...complete, resolved: true }, 'o1') === true,
+      'a confirmed identity still lasts the day');
+  });
+
+  await describe('getAccount — an identity that survives a failed lookup', async (assert) => {
+    const KEY = B.ACCOUNT_KEY;
+
+    const good = loadBridgeWithChrome({
+      routes: {
+        '/api/bootstrap': { account: { uuid: 'u-1', email_address: 'A@B.c' } },
+        '/api/organizations/org-1': { name: 'Org' }
+      }
+    });
+    const first = await good.B.getAccount('org-1');
+    assert(first.uuid === 'u-1' && first.email === 'a@b.c', 'a resolved identity is kept, lowercased');
+    assert(first.orgName === 'Org', 'with the organization alongside it');
+    assert(first.resolved === true, 'and marked as actually resolved');
+
+    // The regression: claude.ai stopped answering the account lookup while the usage
+    // endpoint kept working. Dropping the uuid here files the profile under its
+    // organization instead, which the app cannot tell from a second account in a Team org
+    // — so one failed request grew a duplicate card that could never be merged away.
+    const lost = loadBridgeWithChrome({
+      store: { [KEY]: { uuid: 'u-1', email: 'a@b.c', orgId: 'org-1', orgName: 'Org', ts: 0 } },
+      routes: { '/api/organizations/org-1': { name: 'Org' } }
+    });
+    const kept = await lost.B.getAccount('org-1');
+    assert(kept.uuid === 'u-1', 'a probe that answers nothing carries the last uuid across');
+    assert(kept.orgName === 'Org', 'and does not blank the fields it did not answer');
+    assert(kept.resolved === false, 'while recording that this probe resolved nothing');
+    assert(lost.store[KEY].uuid === 'u-1', 'the cache keeps it rather than being overwritten');
+
+    // A profile signed into a different account must not inherit the last one's uuid.
+    const switched = loadBridgeWithChrome({
+      store: { [KEY]: { uuid: 'u-1', email: 'a@b.c', orgId: 'org-1', ts: 0 } }
+    });
+    const fresh = await switched.B.getAccount('org-2');
+    assert(fresh.uuid === undefined, 'another organization inherits nothing');
+    assert(fresh.orgId === 'org-2', 'and is keyed to the organization it did find');
+
+    const back = loadBridgeWithChrome({
+      store: { [KEY]: { uuid: 'u-old', orgId: 'org-1', resolved: false, ts: 0 } },
+      routes: { '/api/account': { uuid: 'u-new' }, '/api/organizations/org-1': { name: 'Org' } }
+    });
+    const renewed = await back.B.getAccount('org-1');
+    assert(renewed.uuid === 'u-new', 'a lookup that answers again replaces what was carried');
+    assert(renewed.resolved === true, 'and says so, so the day-long cache applies again');
+  });
+
+  await describe('carryOver — what survives a failed lookup', async (assert) => {
+    assert(Object.keys(B.carryOver(undefined, 'o1')).length === 0, 'nothing cached carries nothing');
+    assert(B.carryOver({ uuid: 'u', orgId: 'o1' }, 'o1').uuid === 'u', 'the same org keeps the uuid');
+    assert(B.carryOver({ uuid: 'u', orgId: 'o1' }, 'o2').uuid === undefined, 'another org keeps none of it');
+    assert(B.carryOver({ uuid: 'u', orgId: 'o1' }, undefined).uuid === 'u',
+      'with no org to compare, what is known is kept');
+    assert(B.carryOver({ uuid: 'u', email: null, orgName: '' }, undefined).email === undefined,
+      'empty fields are not carried as values');
   });
 
   await describe('background.js — alarms survive a service-worker wake', async (assert) => {

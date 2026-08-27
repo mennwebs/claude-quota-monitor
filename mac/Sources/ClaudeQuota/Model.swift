@@ -455,3 +455,73 @@ struct CLIStats: Codable, Equatable, Sendable {
         return last
     }
 }
+
+// MARK: - Matching a report to a row
+
+/// Which row a report belongs to, and which rows a source that could not name an account
+/// has left behind. Pure functions of the list and the report, so the rules can be checked
+/// without a store, a server, or a file on disk.
+enum AccountMatch {
+
+    /// Match on the strongest identifier the report carries. The extension and the
+    /// statusline shim describe the same account from different angles — one knows the
+    /// org, the other the OAuth account — so matching has to work from any of them or
+    /// the same quota shows up as two rows.
+    static func index(of r: IncomingReport, in accounts: [AccountSnapshot]) -> Int? {
+        if let u = r.accountUuid, let i = accounts.firstIndex(where: { $0.accountUuid == u }) { return i }
+        if let e = r.email, let i = accounts.firstIndex(where: { $0.email == e }) { return i }
+        if let i = profileIndex(of: r, in: accounts) { return i }
+        // Only when *neither* side names an account. Several accounts can belong to one
+        // Team organization, so an org match between a report that knows its uuid and a
+        // row that does not is not evidence they are the same person.
+        if let o = r.orgId, r.accountUuid == nil,
+           let i = accounts.firstIndex(where: { $0.orgId == o && $0.accountUuid == nil }) { return i }
+        if let k = r.preferredKey, let i = accounts.firstIndex(where: { $0.key == k }) { return i }
+        return nil
+    }
+
+    /// The row this report's browser profile is already feeding.
+    ///
+    /// A source that cannot name the account still names the profile it speaks for, and a
+    /// profile is signed into one account at a time — which is the only thing separating an
+    /// anonymous report from a second account in the same Team organization. Without it, an
+    /// extension whose identity lookup fails once files every later reading under the
+    /// organization, and the panel grows a duplicate card holding the same numbers under a
+    /// name nobody recognises.
+    ///
+    /// A row that knows whose account it is wins over one that does not, so the rule heals
+    /// state the old behaviour left behind rather than going on feeding it.
+    static func profileIndex(of r: IncomingReport, in accounts: [AccountSnapshot]) -> Int? {
+        guard r.accountUuid == nil, r.email == nil, let org = r.orgId,
+              let profile = r.browser?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !profile.isEmpty
+        else { return nil }
+
+        let candidates = accounts.indices.filter {
+            accounts[$0].orgId == org && accounts[$0].browsers.contains(profile)
+        }
+        let named = candidates.filter { accounts[$0].accountUuid != nil }
+        if named.count == 1 { return named[0] }
+        return candidates.count == 1 ? candidates.first : nil
+    }
+
+    /// Rows that exist only because a report once had nowhere else to go.
+    ///
+    /// Now that an anonymous report lands on its profile's real row, a row with no account
+    /// identity holds nothing that is not already somewhere better — provided *every*
+    /// browser feeding it also feeds a named row in the same organization. That proviso is
+    /// where the safety is: an organization can hold several accounts, and one of them
+    /// genuinely unidentified is a row worth keeping.
+    static func redundantAnonymousKeys(in accounts: [AccountSnapshot]) -> [String] {
+        let named = accounts.filter { $0.accountUuid != nil || $0.email != nil }
+        guard !named.isEmpty else { return [] }
+        return accounts.filter { row in
+            guard row.accountUuid == nil, row.email == nil,
+                  let org = row.orgId, !row.browsers.isEmpty
+            else { return false }
+            return row.browsers.allSatisfy { b in
+                named.contains { $0.orgId == org && $0.browsers.contains(b) }
+            }
+        }.map(\.key)
+    }
+}

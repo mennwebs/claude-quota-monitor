@@ -12,10 +12,10 @@ Headers: `Content-Type: application/json`, `X-CQM-Token: <token from the app>`
   "source": "extension",
   "browser": "Chrome",
   "account": {
-    "uuid":    "85eb22d5-…",
+    "uuid":    "00000000-0000-4000-8000-000000000001",
     "email":   "you@example.com",
-    "orgId":   "86316975-…",
-    "orgName": "SeedWebs",
+    "orgId":   "00000000-0000-4000-8000-0000000000ff",
+    "orgName": "Your Org",
     "plan":    "default_claude_max_5x"
   },
   "observedAt": 1787648000,
@@ -45,8 +45,15 @@ Headers: `Content-Type: application/json`, `X-CQM-Token: <token from the app>`
   translated, so a profile running an older extension build keeps reporting.
 - A report with no recognized limit is rejected, because an empty report would refresh a row's
   timestamp without refreshing its numbers.
-- Identity is matched account → email → org, in that order. Several accounts can belong to one
-  Team organization, so `orgId` alone is not an identity.
+- Identity is matched account → email → browser profile → org, in that order. Several accounts
+  can belong to one Team organization, so `orgId` alone is not an identity.
+- `browser` is part of that chain, not decoration. claude.ai has stopped answering the
+  extension's account lookup before, and a report that names only its organization is otherwise
+  indistinguishable from a second account in the same Team org — so it would open a second row
+  for an account that already has one, permanently. A profile is signed into one account at a
+  time, so such a report is filed under the row that profile is already feeding, and only when
+  exactly one row is a candidate. Send the same `browser` string from a given profile every
+  time; changing it is the same as arriving as a new source.
 
 Reply:
 
