@@ -25,28 +25,47 @@ polling, no extra process, and it is the freshest source there is — but only w
 rendering a status line, which means Claude Code in a terminal. In the desktop app the shim
 never runs at all, and the local source simply goes quiet.
 
-### Why `cachedUsageUtilization` is not read
+### What `cachedUsageUtilization` is read for, and what it is not
 
 `~/.claude.json` also holds the last quota response Claude Code fetched, under
-`cachedUsageUtilization`, and it needs no status line. It was wired up and then removed, because
-the block cannot say whose quota it is holding.
+`cachedUsageUtilization`. Its **percentages are not read**; its **account uuid is**. Those two
+decisions come from opposite evidence, so both are worth writing down.
 
-It carries exactly three fields — `fetchedAtMs`, `accountUuid`, `utilization` — and no
-organization. On this machine it read `accountUuid` = the account signed in, while the numbers
-and reset instants matched a *different* account's browser reading to the second: 5h 30% and 7d
-27% resetting 08-31T17:00Z, against that account's own org, which was at 0% with a reset two days
-later. Quota belongs to a rate-limit bucket, the block names an account, and the two are not the
-same thing.
+The numbers were wired up once and removed. The block carries three fields — `fetchedAtMs`,
+`accountUuid`, `utilization` — and is refetched rarely, so it sits hours behind the status line
+next to it. Filed under the account it names, a stale reading overwrote a correct row and won
+the merge for being newer, because newer is all the merge looks at. One reading was seen whose
+numbers matched a *different* account's browser reading to the second: 5h 30% and 7d 27%
+resetting 08-31T17:00Z, against an account whose own org was at 0% with a reset two days later.
 
-Filed under the account it names, that reading overwrote a correct row with somebody else's
-numbers — and it won the merge, because it was newer. A cross-check against the browser's reset
-time would have caught this one, but only for accounts a browser is already reporting, which are
-exactly the accounts that do not need a fallback.
+The uuid answers a question nothing else on this machine can. The status line payload names no
+account at all, so its identity used to come from `oauthAccount` — and `oauthAccount` says who
+Claude Code last *looked up*, not whose credential it is *using*. On this machine the two had
+disagreed since July: `oauthAccount` named one account while every status line reading belonged
+to another, and one account's quota was drawn on the other's card for weeks.
 
-The status line payload has the same shape of weakness: it carries no account either, so its
-identity comes from `oauthAccount`. It is kept because the reading and the identity at least come
-from the same live session, but a session working under another organization can misfile the same
-way. Treat any local-CLI row with suspicion when it disagrees with the browser.
+`cachedUsageUtilization` is stamped with the account the response actually came back for, which
+makes it the one thing in the file that follows the credential. It is trusted only when the
+seven-day reset instant it carries matches the one the status line just sent, to within a
+second — a week-long window sits at its own instant per account and does not move while it runs,
+so an agreeing reset means both are describing the same account's week. The five-hour window
+cannot do this job: it rolls every five hours, and this block is older than that most of the time.
+
+So: uuids agree → the identity stands. They disagree and the seven-day windows match → the
+credential's uuid is used **alone**, with no email, organization or plan attached, because those
+describe the account `oauthAccount` named. They disagree and nothing ties either account to
+these numbers → no row. A gap is closed by the next report; a wrong row overwrites a correct
+reading and wins for being newer.
+
+The alternative was to read Claude Code's keychain item and ask `/api/oauth/profile` who the
+token belongs to. That is authoritative, and it costs a keychain prompt on every rebuild of an
+ad-hoc signed app, makes this the app's only outbound request, and puts a live access token on
+the wire for a menu bar widget. Both accounts were already in a file being read once a second.
+
+What this does not prove is that the block's uuid always owns the block's own numbers — it did
+on the machine this was found on, twice over, but the guard above inherits that assumption. If
+it ever fails, the stronger cross-check is against the extension's live reading for the row
+being written, which is evidence from outside `~/.claude.json` entirely.
 
 Neither side is complete on its own. The status line has no per-model ceilings and does not say
 which account it belongs to; the extension does not know about your terminal. Merged, one
