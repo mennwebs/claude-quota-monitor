@@ -6,6 +6,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-a78bfa.svg)](LICENSE)
 [![Users](https://img.shields.io/chrome-web-store/users/gpeogkjjkpmdjgggeaegmnmlmikgkjjm?color=a78bfa)](https://chromewebstore.google.com/detail/claude-quota-monitor/gpeogkjjkpmdjgggeaegmnmlmikgkjjm)
 
+> [!NOTE]
+> This repo is the macOS fork of Claude Quota Monitor. It follows the upstream extension at
+> [claudequotamonitor/claude-quota-monitor](https://github.com/claudequotamonitor/claude-quota-monitor)
+> and adds a macOS menu bar app plus the bridge that feeds it — see
+> [macOS menu bar bridge](#macos-menu-bar-bridge). The Chrome Web Store listing, support email,
+> and sponsor links below are the upstream project's.
+
 ## Features
 
 - **Session usage** — current 5-hour window with color-coded progress bar
@@ -63,7 +70,7 @@ while the quota fetch stays on its slow poll. Request volume to claude.ai is unc
 ### Setup
 
 ```bash
-git clone https://github.com/claudequotamonitor/claude-quota-monitor.git
+git clone https://github.com/mennwebs/claude-quota-monitor.git
 cd claude-quota-monitor
 npm install
 ```
@@ -132,4 +139,4 @@ This project is not affiliated with or endorsed by Anthropic.
 
 ## License
 
-[MIT](LICENSE) © 2026 The Claude Quota Monitor team
+[MIT](LICENSE) © 2026 The Claude Quota Monitor team · macOS app and bridge © 2026 Menn (mennwebs)
