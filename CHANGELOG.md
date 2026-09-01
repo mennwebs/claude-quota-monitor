@@ -4,7 +4,7 @@ All notable changes to Claude Quota Monitor are documented here.
 
 ---
 
-## [Unreleased] — macOS menu bar bridge
+## [1.8] — 2026-09-01
 
 ### Added
 - `bridge.js` — pushes the reading this extension already has to a menu bar app listening on
@@ -16,11 +16,9 @@ All notable changes to Claude Quota Monitor are documented here.
 - The app can ask for a real refresh in its reply to a push — the only path from the Mac back
   into the browser.
 - `mac/` — the menu bar app itself, in this repo because the two halves share the wire contract
-  in `docs/protocol.md`.
+  in `docs/protocol.md`. First release of the app, versioned 1.0.0 on its own track.
 - `tests/test-bridge.js` — checks over the payload builder and the alarm scheduling, loading
   `bridge.js` and `background.js` themselves rather than copies, so they cannot drift.
-
-### Added
 - `--enable-login-item` / `--disable-login-item` / `--login-item-status` on the Mac app, next to
   the statusline flags and for the same reason: "open at login" is a persistent change to the
   machine, and being able to set and inspect it from a terminal makes it auditable. The GUI
@@ -68,6 +66,7 @@ All notable changes to Claude Quota Monitor are documented here.
 - The badge's binding-limit tracking follows 1.7.2's move to dynamic per-model categories
   instead of naming Opus, so a new model is picked up without a code change.
 
+---
 
 ## [1.7.3] — 2026-07-31
 
