@@ -101,3 +101,35 @@ matches the one the status line just sent, within a second; otherwise the report
 rather than filed under a guess. A corrected identity carries the uuid alone, since the details
 beside it in the file belong to the other account. See `mac/README.md` for why the keychain is
 not consulted instead.
+
+## The quota API source
+
+Off by default, and never reaches the wire above — it is the Mac app talking to Anthropic
+directly, with the OAuth token Claude Code keeps in the login keychain item
+`Claude Code-credentials`.
+
+- `GET https://api.anthropic.com/api/oauth/profile` — who the token belongs to.
+- `GET https://api.anthropic.com/api/oauth/usage` — the same document claude.ai serves the
+  extension, so parsing mirrors `content.js` field for field: `five_hour` and `seven_day` as
+  objects, per-model caps in `limits[]` as `kind: "weekly_scoped"`, and `extra_usage`. Slugs are
+  produced by the rule in `slugModel` (`bridge.js`); the two sources write one key space, and a
+  mismatch would draw one model as two rows.
+- Both carry `Authorization: Bearer <accessToken>` and `anthropic-beta: oauth-2025-04-20`.
+
+**Read-only, and that is a hard rule.** The access token expires in hours, and the refresh that
+renews it rotates the refresh token as well — Claude Code stores back whatever the token
+endpoint returns. A second process refreshing the same credential leaves one of the two holding
+a dead refresh token, and the loser is as likely to be the CLI, which would then be silently
+logged out. So the app reads; when the token has expired it says so and waits for Claude Code
+to renew it. It never refreshes, and it never writes to the keychain.
+
+`plan` is deliberately not taken from the profile. It and claude.ai's
+`/api/organizations/{id}` word the tier differently for the same organization
+(`default_claude_max_5x` against `default_raven`, on one Team seat), and merging is
+last-writer-wins — so carrying both would make a row's plan badge alternate. The tier this
+endpoint reports is shown in Settings instead, beside the account it identifies.
+
+While this source is on, the status line's identity comes from it too. The file-based rule above
+has to infer whose credential Claude Code is using; the profile answers it, from the same auth
+context the numbers come from, so it is taken outright — including in the case that rule refuses
+to guess at, where the reading would otherwise be dropped.

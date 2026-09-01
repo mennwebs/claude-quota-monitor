@@ -41,9 +41,15 @@ The extension reads quota data from the `claude.ai/api/organizations/*/usage` en
 
 ## macOS menu bar bridge
 
-If you run several Claude accounts in several Chrome profiles, this fork can push each
-profile's reading to the macOS menu bar app in [`mac/`](mac/) — one bar per account, with reset
-times, and readings greyed out once they go stale.
+The macOS menu bar app in [`mac/`](mac/) shows one bar per account, with reset times, and
+readings greyed out once they go stale. It takes quota from whichever of these you have:
+
+- **Browser profiles.** If you run several Claude accounts in several Chrome profiles, this
+  fork pushes each profile's reading to the app. This is the only way to watch more than one
+  account at a time.
+- **Claude Code on the same Mac.** If you live in the terminal and never open claude.ai in a
+  browser, the app works on its own — no extension needed. See
+  [Quota without a browser](#quota-without-a-browser).
 
 The app lives in this repo because the two halves share a wire contract
 ([`docs/protocol.md`](docs/protocol.md)); changing it on one side without the other is the
@@ -59,6 +65,35 @@ does not hold it, and Chrome only asks when you press Save & connect. With the b
 
 Re-posting the cached reading is free on claude.ai's side, so the bridge pushes every minute
 while the quota fetch stays on its slow poll. Request volume to claude.ai is unchanged.
+
+### Quota without a browser
+
+If you use Claude Code and never open claude.ai in a browser, the menu bar app stands on its
+own — you do not need the extension at all.
+
+Turn on **ตั้งค่า… → ในเครื่อง → quota API**. The app then reads quota straight from
+`api.anthropic.com/api/oauth/usage` — the endpoint Claude Code's own `/usage` calls — using the
+OAuth token Claude Code keeps in the login keychain item `Claude Code-credentials`. It covers
+the one account Claude Code is signed in as, and for that account it carries everything the
+extension does: the two ceilings, per-model weekly caps and extra-usage credits, around the
+clock rather than only while a terminal is drawing a status line.
+
+Watching **several** accounts at once still needs the browser, one profile per account: a
+keychain holds one Claude Code login, and an access token that no Claude Code run renews goes
+stale within hours.
+
+It is **off by default**, because it reads a credential belonging to another application, and it
+is **read-only permanently**:
+
+- it never refreshes the token — the refresh that renews an access token rotates the refresh
+  token too, and a second process doing that can log Claude Code out. An expired token is
+  reported as expired and left for Claude Code to renew;
+- it never writes to the keychain;
+- it makes exactly two `GET`s, every five minutes.
+
+This is an endpoint Anthropic does not document and can change without notice — the same footing
+as the `claude.ai/api/organizations/*/usage` the extension has always read. It is one account
+per token, so browser profiles remain the way to watch several accounts at once.
 
 ## Development
 

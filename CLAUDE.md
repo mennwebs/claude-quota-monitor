@@ -114,6 +114,26 @@ there is no XCTest bundle.
 - **Quota percentages are the only truth about quota.** Token counts cannot be converted back
   into a percentage — Claude weights usage server-side — so they stay on their own line and
   never feed a bar.
+- **Never refresh Claude Code's OAuth token.** The app reads
+  `Claude Code-credentials` from the login keychain for the quota API source. Renewing an
+  access token also *rotates the refresh token* — the CLI stores back whatever the token
+  endpoint returns — so a second process refreshing the same credential leaves one of the two
+  holding a dead one, and the loser is as likely to be Claude Code, which is then silently
+  logged out. An expired token is a state to report and wait out, not a problem to solve.
+  Nothing in this repo may write to that keychain item.
+- **Adding a stored field to `AppSettings` needs a line in its `init(from:)`.**
+  `AppSettings.load()` answers a thrown decode with defaults and Swift's synthesized
+  `Decodable` ignores property defaults, so a field added to the struct alone would wipe every
+  account label, the chosen port and the thresholds on the first launch of the new build. The
+  decoder falls each field back on its own; `--selftest` round-trips the whole struct, which is
+  what catches the field that was added but not wired up.
+- **`oauthAccount` in `~/.claude.json` is not proof of who the CLI is signed in as.** It names
+  who Claude Code last looked up, and has been seen naming one account for weeks while the
+  credential in use belonged to another — which files the status line's quota onto the wrong
+  row with a `CLI` badge on it. By default that is settled against
+  `cachedUsageUtilization.accountUuid` and the seven-day reset instant
+  (`CLIIdentity.attribution`, and `mac/README.md` for the reasoning); when the quota API source
+  is on, `/api/oauth/profile` answers it outright and replaces that inference.
 
 ## Verifying panel changes
 

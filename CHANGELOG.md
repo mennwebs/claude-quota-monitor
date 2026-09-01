@@ -6,7 +6,43 @@ All notable changes to Claude Quota Monitor are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Mac app: an optional quota source that reads the API directly.** `ตั้งค่า… → ในเครื่อง →
+  quota API` borrows the OAuth token Claude Code keeps in the login keychain and reads
+  `api.anthropic.com/api/oauth/usage` — the endpoint the CLI's own `/usage` calls. It answers
+  the same document claude.ai serves the extension, so the account Claude Code is signed into
+  gets its per-model weekly caps and extra-usage credits without a browser profile pointed at
+  it, and around the clock rather than only while a terminal is drawing a status line.
+
+  **Off by default**, because turning it on reads a credential belonging to another
+  application. **Read-only, permanently**: the refresh that renews an access token also rotates
+  the refresh token, so a second process refreshing the same credential can log Claude Code
+  out. When the token expires the panel says so and waits for Claude Code to renew it.
+
+  Complements the statusline shim rather than replacing it — the shim is still fresher and
+  still costs no request. Both may be on; readings merge per limit on observation time, as
+  every source does.
+- Pressing Refresh now actually refreshes this source. The browser can only be *asked*, through
+  a flag it answers on its own minute; this source is local, so it just fetches.
+- **An empty panel now offers the route this machine can take.** It named only the extension,
+  so someone who lives in Claude Code and has no browser profile signed in read it as "this app
+  is not for you" and closed it. When Claude Code has signed in here and the quota API source
+  is still off, the panel says so first and the extension line follows as the alternative. When
+  the source is on but stuck on something only the user can clear — a declined keychain, no
+  credential — it points at Settings rather than leaving an empty panel with no route to the
+  reason it is empty. Whether Claude Code has signed in is read from `~/.claude.json`, which is
+  already polled; the keychain is not touched to decide what to suggest.
+
 ### Fixed
+- **A new field in `settings.json` silently wiped every setting.** `AppSettings.load()` answers
+  a thrown decode with defaults and Swift's synthesized `Decodable` ignores property defaults,
+  so adding one stored field would have taken the user's account labels, their chosen port and
+  their freshness thresholds with it on the first launch of the new build. Each field now falls
+  back on its own; one unreadable field costs that field, not the file. `--selftest` round-trips
+  the whole struct so the next field added but not wired up is caught here.
+- Per-model caps are retired per source rather than by the extension alone. Two sources that
+  both list caps poll on their own clocks, so one dropping Opus must not erase the other's
+  live Opus reading.
 - **The Mac app put Claude Code's quota on the wrong account's card.** The status line payload
   names no account, so the app took one from `oauthAccount` in `~/.claude.json` — which says who
   Claude Code last *looked up*, not whose credential it is *using*. On the machine this was found
@@ -25,6 +61,10 @@ All notable changes to Claude Quota Monitor are documented here.
 
   A row already holding the wrong numbers heals itself — the extension reports the same two
   ceilings for that account, and the next push is newer.
+
+  With the quota API source above turned on, that inference is not needed: `/api/oauth/profile`
+  answers from the same auth context as the numbers, so it is taken as the credential's account
+  outright — including in the case the file-based rule refuses to guess at.
 
 ---
 

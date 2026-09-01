@@ -74,8 +74,21 @@ struct Limit: Identifiable, Equatable, Sendable {
 enum ReadingSource: String, Codable, Sendable {
     case ext = "extension"   // Chrome extension talking to claude.ai
     case cli = "cli"         // statusline shim on this machine
+    case api = "api"         // api.anthropic.com, with Claude Code's own token
 
-    var badge: String { self == .cli ? "CLI" : "web" }
+    var badge: String {
+        switch self {
+        case .cli: return "CLI"
+        case .api: return "API"
+        case .ext: return "web"
+        }
+    }
+
+    /// Whether a report from this source lists every per-model cap the account has.
+    /// The status line carries only the two ceilings, so its silence about Opus says
+    /// nothing about whether Opus is still capped — which is what `retireModelCaps`
+    /// has to be able to tell apart.
+    var carriesModelCaps: Bool { self != .cli }
 }
 
 /// One percentage for one limit, stamped with when it was actually observed —
@@ -353,15 +366,22 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         // stamped with the newest observation in the report rather than with the moment
         // the report arrived. A source re-delivering yesterday's numbers is not live.
         let observed = r.limits.values.map(\.observedAt).max() ?? r.receivedAt
-        if r.source == .cli {
+        switch r.source {
+        case .cli:
             sawCLI = true
-            noteSource("CLI", at: observed)
-        } else if let b = r.browser?.trimmingCharacters(in: .whitespacesAndNewlines), !b.isEmpty {
-            if !browsers.contains(b) {
-                browsers.append(b)
-                browsers.sort()
+            noteSource(r.source.badge, at: observed)
+        case .api:
+            // No browser to name, so the badge is the source itself. Without this the
+            // row would draw no chip at all for a source that is plainly feeding it.
+            noteSource(r.source.badge, at: observed)
+        case .ext:
+            if let b = r.browser?.trimmingCharacters(in: .whitespacesAndNewlines), !b.isEmpty {
+                if !browsers.contains(b) {
+                    browsers.append(b)
+                    browsers.sort()
+                }
+                noteSource(b, at: observed)
             }
-            noteSource(b, at: observed)
         }
 
         for (rawKind, reading) in r.limits {
@@ -385,13 +405,18 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
     /// alone, an Opus bar from yesterday keeps its row next to today's numbers and reads
     /// as one of them.
     ///
-    /// Only an extension report may retire them: the status line never carries model
-    /// caps at all, so its silence about Opus is not evidence that Opus is gone.
+    /// Only a source that lists them all may retire them: the status line never carries
+    /// model caps at all, so its silence about Opus is not evidence that Opus is gone.
+    ///
+    /// And a source may only retire its *own* readings. The extension and the API source
+    /// both list caps, but they poll on their own clocks — so a cap the API has already
+    /// dropped can still be arriving from the browser, and letting either speak for the
+    /// other would make one source's timing erase the other's live reading.
     private mutating func retireModelCaps(missingFrom r: IncomingReport) {
-        guard r.source == .ext else { return }
+        guard r.source.carriesModelCaps else { return }
         let cutoff = r.receivedAt.addingTimeInterval(-Self.retiredModelCapAge)
         limits = limits.filter { id, reading in
-            guard id.hasPrefix(LimitID.weeklyPrefix), reading.source == .ext,
+            guard id.hasPrefix(LimitID.weeklyPrefix), reading.source == r.source,
                   r.limits[id] == nil
             else { return true }
             return reading.observedAt > cutoff
