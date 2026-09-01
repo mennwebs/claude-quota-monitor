@@ -259,6 +259,27 @@ private struct LocalSettings: View {
                 Toggle("อ่านไฟล์ที่ shim เขียน", isOn: $store.settings.readCLIStatusline)
             }
 
+            Section("quota API") {
+                LabeledContent("สถานะ") { apiLabel }
+
+                if needsRetry {
+                    Button("ลองใหม่") { store.retryQuotaAPI() }
+                        .buttonStyle(.link)
+                }
+
+                Text("ยืม token ที่ Claude Code เก็บไว้ใน keychain มาอ่าน endpoint เดียวกับที่ `/usage` ในตัว CLI ใช้ ได้ทั้ง 5h/7d เพดานรายโมเดล และเครดิตเสริม ของบัญชีที่ Claude Code ล็อกอินอยู่ · ทำงานตลอดเวลา ไม่ต้องรอให้มีแถบสถานะให้วาด · **อ่านอย่างเดียว** ไม่ต่ออายุ token และไม่เขียนอะไรกลับ keychain เพราะการต่ออายุจะสับเปลี่ยน refresh token แล้ว Claude Code จะหลุดล็อกอิน")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Toggle("อ่านโควต้าจาก API ด้วย token ของ Claude Code", isOn: $store.settings.readQuotaAPI)
+
+                if store.settings.readQuotaAPI {
+                    // The one line that would have caught a stale `~/.claude.json`
+                    // filing one account's quota onto another account's row.
+                    Text("เปิดอยู่แล้วบัญชีที่ขึ้นด้านบนคือเจ้าของ token จริง ๆ · แถว CLI จะถูกจัดเข้าบัญชีนี้แทนที่จะเชื่อ `~/.claude.json`")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
             Section("สถิติในเครื่อง") {
                 Toggle("อ่าน ~/.claude/stats-cache.json", isOn: $store.settings.readStatsCache)
                 if let stats = store.stats {
@@ -301,6 +322,44 @@ private struct LocalSettings: View {
                 .foregroundStyle(.secondary)
         case .notConfigured:
             Label("ยังไม่มี status line", systemImage: "circle.dashed").foregroundStyle(.secondary)
+        }
+    }
+
+    /// Only the two states the user resolves themselves. Everything else either fixes
+    /// itself on the next tick or is waiting on Claude Code, and a retry button next to
+    /// those would just be a button that does nothing.
+    private var needsRetry: Bool {
+        store.settings.readQuotaAPI
+            && (store.apiStatus == .denied || store.apiStatus == .noCredential)
+    }
+
+    @ViewBuilder private var apiLabel: some View {
+        switch store.apiStatus {
+        case .off:
+            Label("ปิดอยู่", systemImage: "circle.dashed").foregroundStyle(.secondary)
+        case .waiting:
+            Label("กำลังอ่าน…", systemImage: "circle.dotted").foregroundStyle(.secondary)
+        case .ok(let account, let org, let tier, let at):
+            // Account first: this line exists to say *whose* numbers these are.
+            let trail = [org, Fmt.plan(tier)].compactMap { $0 }.joined(separator: " · ")
+            Label(trail.isEmpty ? account : "\(account) · \(trail)", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .help("อ่านล่าสุด \(Fmt.ago(at, now: store.now))")
+        case .noCredential:
+            Label("ไม่พบ token — Claude Code ยังไม่เคยล็อกอินบนเครื่องนี้", systemImage: "person.crop.circle.badge.questionmark")
+                .foregroundStyle(.orange)
+        case .denied:
+            Label("ไม่ได้รับอนุญาตให้อ่าน keychain", systemImage: "lock.circle")
+                .foregroundStyle(.orange)
+        case .expired:
+            // Not a failure: Claude Code renews this the next time it runs.
+            Label("token หมดอายุ · รอ Claude Code ต่ออายุให้", systemImage: "clock.badge.exclamationmark")
+                .foregroundStyle(.secondary)
+        case .unauthorized:
+            Label("token ใช้ไม่ได้ (401) · รอ Claude Code ต่ออายุให้", systemImage: "clock.badge.exclamationmark")
+                .foregroundStyle(.orange)
+        case .failed(let why):
+            Label(why, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
         }
     }
 }

@@ -97,6 +97,41 @@ struct AppSettings: Codable, Equatable, Sendable {
     var thresholds = FreshnessThresholds()
     var readCLIStatusline = true
     var readStatsCache = true
+    /// Off by default, and it stays that way: turning it on reads a credential that
+    /// belongs to Claude Code, which is the user's call rather than a default.
+    var readQuotaAPI = false
+
+    private enum CodingKeys: String, CodingKey {
+        case port, labels, hidden, order, thresholds
+        case readCLIStatusline, readStatsCache, readQuotaAPI
+    }
+
+    init() {}
+
+    /// Every field falls back to its default on its own, rather than the whole file
+    /// failing together.
+    ///
+    /// `load()` answers a thrown decode with a blank `AppSettings`, and Swift's
+    /// synthesized `Decodable` ignores property defaults — so before this, one new
+    /// stored field here or in `FreshnessThresholds` silently took every label the user
+    /// had typed and their chosen port with it, on the first launch of the new build.
+    /// Adding a field means adding a line here too; `--selftest` round-trips the whole
+    /// struct so the one that gets forgotten is caught rather than shipped.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = AppSettings()
+        func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
+            ((try? c.decodeIfPresent(T.self, forKey: key)) ?? nil) ?? fallback
+        }
+        port              = value(.port, d.port)
+        labels            = value(.labels, d.labels)
+        hidden            = value(.hidden, d.hidden)
+        order             = value(.order, d.order)
+        thresholds        = value(.thresholds, d.thresholds)
+        readCLIStatusline = value(.readCLIStatusline, d.readCLIStatusline)
+        readStatsCache    = value(.readStatsCache, d.readStatsCache)
+        readQuotaAPI      = value(.readQuotaAPI, d.readQuotaAPI)
+    }
 
     static func load() -> AppSettings {
         guard let d = try? Data(contentsOf: Paths.settings),

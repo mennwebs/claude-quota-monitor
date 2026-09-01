@@ -22,6 +22,7 @@ final class LocalSources {
     private var statsStamp: Date?
     private var statsMissing = false
     private var identity: CLIIdentity?
+    private var credentialIdentity: CLIIdentity?
 
     private var wantStatusline = true
     private var wantStats = true
@@ -30,6 +31,19 @@ final class LocalSources {
          onStats: @escaping @Sendable (CLIStats?) -> Void) {
         self.onCLIReport = onCLIReport
         self.onStats = onStats
+    }
+
+    /// Who the OAuth credential on this machine really belongs to, once the quota API
+    /// source has asked. Nil when that source is off, or has not answered yet.
+    func setCredentialIdentity(_ id: CLIIdentity?) {
+        queue.async { [weak self] in
+            guard let self, self.credentialIdentity != id else { return }
+            self.credentialIdentity = id
+            // Re-read on the next tick rather than waiting for the shim to write again:
+            // a correction that only lands on the next Claude Code render could sit
+            // behind a wrong row for as long as the terminal is idle.
+            self.cliDumpStamp = nil
+        }
     }
 
     func configure(statusline: Bool, stats: Bool) {
@@ -94,8 +108,14 @@ final class LocalSources {
         guard let data = try? Data(contentsOf: Paths.cliDump) else { return }
         // The shim's write and our read race by design; a half-written file simply
         // fails to parse and we pick it up on the next tick.
+        //
+        // `/api/oauth/profile` answers the question `~/.claude.json` can only be made to
+        // infer — whose credential Claude Code is using — from the same auth context the
+        // numbers come from. When the quota API source has told us, it replaces the
+        // file-derived identity outright rather than being weighed against it, which also
+        // covers the case the file-based rule refuses to guess at and drops.
         guard let report = Ingest.cliReport(statuslineJSON: data,
-                                            identity: identity,
+                                            identity: credentialIdentity ?? identity,
                                             observedAt: m) else { return }
         onCLIReport(report)
     }

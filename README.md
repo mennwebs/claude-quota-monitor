@@ -60,6 +60,28 @@ does not hold it, and Chrome only asks when you press Save & connect. With the b
 Re-posting the cached reading is free on claude.ai's side, so the bridge pushes every minute
 while the quota fetch stays on its slow poll. Request volume to claude.ai is unchanged.
 
+### Reading the API directly, without a browser
+
+The app can also read quota straight from `api.anthropic.com/api/oauth/usage` — the endpoint
+Claude Code's own `/usage` calls — using the OAuth token Claude Code keeps in the login keychain
+item `Claude Code-credentials`. It covers the one account Claude Code is signed in as, and for
+that account it carries everything the extension does: the two ceilings, per-model weekly caps
+and extra-usage credits, around the clock rather than only while a terminal is drawing a status
+line. Turn it on in **ตั้งค่า… → ในเครื่อง → quota API**.
+
+It is **off by default**, because it reads a credential belonging to another application, and it
+is **read-only permanently**:
+
+- it never refreshes the token — the refresh that renews an access token rotates the refresh
+  token too, and a second process doing that can log Claude Code out. An expired token is
+  reported as expired and left for Claude Code to renew;
+- it never writes to the keychain;
+- it makes exactly two `GET`s, every five minutes.
+
+This is an endpoint Anthropic does not document and can change without notice — the same footing
+as the `claude.ai/api/organizations/*/usage` the extension has always read. It is one account
+per token, so browser profiles remain the way to watch several accounts at once.
+
 ## Development
 
 ### Prerequisites

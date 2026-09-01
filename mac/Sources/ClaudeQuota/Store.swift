@@ -36,6 +36,7 @@ final class Store: ObservableObject {
     @Published private(set) var accounts: [AccountSnapshot] = []
     @Published private(set) var stats: CLIStats?
     @Published private(set) var serverState: LoopbackServer.ServerState = .stopped
+    @Published private(set) var apiStatus: APISource.Status = .off
     @Published private(set) var now = Date()
     @Published var settings: AppSettings {
         didSet { onSettingsChanged(from: oldValue) }
@@ -46,6 +47,7 @@ final class Store: ObservableObject {
 
     private var server: LoopbackServer!
     private var local: LocalSources!
+    private var api: APISource!
     private var ticker: Timer?
     private var persistWork: DispatchWorkItem?
     private var started = false
@@ -79,6 +81,17 @@ final class Store: ObservableObject {
                 Task { @MainActor [weak self] in self?.stats = s }
             }
         )
+        api = APISource(
+            onReport: { [weak self] report in
+                Task { @MainActor [weak self] in self?.ingest(report) }
+            },
+            onIdentity: { [weak self] id in
+                Task { @MainActor [weak self] in self?.local.setCredentialIdentity(id) }
+            },
+            onStatus: { [weak self] st in
+                Task { @MainActor [weak self] in self?.apiStatus = st }
+            }
+        )
     }
 
     /// The menu bar label's `onAppear` can fire more than once; starting is idempotent.
@@ -93,6 +106,7 @@ final class Store: ObservableObject {
         server.start(port: settings.port, token: token)
         local.configure(statusline: settings.readCLIStatusline, stats: settings.readStatsCache)
         local.start()
+        api.configure(enabled: settings.readQuotaAPI)
 
         // Five seconds is enough: countdowns are shown to the minute, and freshness
         // thresholds are minutes apart. A 1 s tick would only buy redraws nobody sees.
@@ -106,6 +120,7 @@ final class Store: ObservableObject {
     func stop() {
         ticker?.invalidate(); ticker = nil
         local.stop()
+        api.stop()
         server.stop()
         persistNow()
     }
@@ -256,7 +271,17 @@ final class Store: ObservableObject {
         sortAccounts()
     }
 
-    func requestRefresh() { refreshFlag.raise() }
+    /// Raising the flag is all we can do to the browser — it is answered on the
+    /// extension's own minute. The API source is ours, so it can simply go and fetch.
+    func requestRefresh() {
+        refreshFlag.raise()
+        api.refreshNow()
+    }
+
+    /// After a declined keychain prompt or a login that had not happened yet: the API
+    /// source stops its clock rather than re-prompting on a timer, so the way back is
+    /// the user saying to try again.
+    func retryQuotaAPI() { api.refreshNow() }
 
     /// Newest observation anywhere, for the panel header.
     var lastUpdate: Date? { accounts.compactMap(\.observedAt).max() }
@@ -283,6 +308,9 @@ final class Store: ObservableObject {
         }
         if old.readCLIStatusline != settings.readCLIStatusline || old.readStatsCache != settings.readStatsCache {
             local.configure(statusline: settings.readCLIStatusline, stats: settings.readStatsCache)
+        }
+        if old.readQuotaAPI != settings.readQuotaAPI {
+            api.configure(enabled: settings.readQuotaAPI)
         }
         if old.order != settings.order { sortAccounts() }
     }

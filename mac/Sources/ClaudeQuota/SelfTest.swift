@@ -568,7 +568,38 @@ enum SelfTest {
         if let s = try? JSONIO.decoder.decode(AppSettings.self, from: Data(earlierSettings.utf8)) {
             check("settings still decode", s.labels["acct:1"] == "Menn")
             check("and keep the chosen port", s.port == 47821)
+            check("a field added since takes its default", s.readQuotaAPI == false)
         } else { failed += 1; print("  ✗  a settings file from an earlier build no longer decodes") }
+
+        // The rule the custom decoder buys: one unreadable field costs that field, not
+        // the file. A `thresholds` that gains a stored property in some later build must
+        // not take the labels with it.
+        let futureSettings = """
+        {"labels":{"acct:1":"Menn"},"port":47999,"readQuotaAPI":true,
+         "thresholds":{"aging":"not-a-number"}}
+        """
+        if let s = try? JSONIO.decoder.decode(AppSettings.self, from: Data(futureSettings.utf8)) {
+            check("a malformed nested block costs only itself", s.labels["acct:1"] == "Menn")
+            check("neighbouring fields survive it", s.port == 47999 && s.readQuotaAPI)
+            check("and it falls back to its own defaults",
+                  s.thresholds == FreshnessThresholds())
+        } else { failed += 1; print("  ✗  a settings file with one bad field threw the lot away") }
+
+        // Round-trip every field, so the next one added to the struct but forgotten in
+        // `CodingKeys` is caught here rather than by a user losing their labels.
+        var full = AppSettings()
+        full.port = 47999
+        full.labels = ["acct:1": "Menn"]
+        full.hidden = ["acct:2"]
+        full.order = ["acct:1", "acct:2"]
+        full.thresholds = FreshnessThresholds(fresh: 11, aging: 22, stale: 33)
+        full.readCLIStatusline = false
+        full.readStatsCache = false
+        full.readQuotaAPI = true
+        if let d = try? JSONIO.encoder.encode(full),
+           let back = try? JSONIO.decoder.decode(AppSettings.self, from: d) {
+            check("every settings field survives a round trip", back == full)
+        } else { failed += 1; print("  ✗  settings did not round-trip") }
 
         let earlierAccount = """
         {"key":"acct:1","browsers":["Menn"],"sawCLI":true,"firstSeen":1787600000,
@@ -584,6 +615,178 @@ enum SelfTest {
         check("hours", Fmt.gap(2 * 3600 + 300) == "2 ชม.")
         check("days", Fmt.gap(3 * 86400) == "3 วัน")
         check("not phrased as an age", Fmt.quiet(41 * 60) == "เงียบ 41 นาที")
+
+        // MARK: - The quota API source
+
+        print("\n▸ CLICredential — the keychain item, without a keychain")
+        let credential = """
+        {"claudeAiOauth":{"accessToken":"sk-ant-oat01-xxx","refreshToken":"sk-ant-ort01-yyy",
+         "expiresAt":1788280623435,"scopes":["user:inference"],"subscriptionType":"team"}}
+        """
+        if let t = CLICredential.parse(Data(credential.utf8)) {
+            check("the access token is picked out", t.value == "sk-ant-oat01-xxx")
+            check("a millisecond expiry is read as seconds",
+                  t.expiresAt.map { abs($0.timeIntervalSince1970 - 1_788_280_623.435) < 1 } ?? false)
+            check("live at a moment before it", !t.isExpired(at: Date(timeIntervalSince1970: 1_788_270_000)))
+            check("expired at a moment after it", t.isExpired(at: Date(timeIntervalSince1970: 1_788_290_000)))
+            // Treated as expired slightly early on purpose: a token that dies in flight
+            // shows up as a network failure, which is a worse thing to put on screen.
+            check("and expired just before it, not exactly on it",
+                  t.isExpired(at: Date(timeIntervalSince1970: 1_788_280_600)))
+        } else { failed += 1; print("  ✗  a well-formed credential did not parse") }
+
+        check("an item with no OAuth block is refused",
+              CLICredential.parse(Data(#"{"other":1}"#.utf8)) == nil)
+        check("an empty access token is refused",
+              CLICredential.parse(Data(#"{"claudeAiOauth":{"accessToken":""}}"#.utf8)) == nil)
+        check("a credential with no expiry never reads as expired",
+              CLICredential.parse(Data(#"{"claudeAiOauth":{"accessToken":"x"}}"#.utf8))?
+                  .isExpired(at: Date(timeIntervalSince1970: 4_000_000_000)) == false)
+
+        print("\n▸ QuotaAPI — slugs must match bridge.js exactly")
+        // Both sides write into one key space; a mismatch draws one model as two rows.
+        check("a plain name", QuotaAPI.slug("Opus") == "opus")
+        check("a spaced name", QuotaAPI.slug("Claude Design") == "claude-design")
+        check("runs of punctuation collapse", QuotaAPI.slug("Opus  4.5 (1M)") == "opus-4-5-1m")
+        check("leading and trailing separators are trimmed", QuotaAPI.slug(" -Fable- ") == "fable")
+        check("capped at 32 characters", QuotaAPI.slug(String(repeating: "a", count: 40)).count == 32)
+        check("a name with nothing usable slugs to empty", QuotaAPI.slug("…") == "")
+
+        print("\n▸ QuotaAPI — /api/oauth/profile")
+        let profile = """
+        {"account":{"uuid":"acc-1","full_name":"A B","email":"Me@Example.com"},
+         "organization":{"uuid":"org-1","name":"SeedWebs","rate_limit_tier":"default_claude_max_5x"},
+         "application":{"slug":"claude-code"}}
+        """
+        if let id = QuotaAPI.identity(fromProfile: Data(profile.utf8)) {
+            check("the account is named", id.accountUuid == "acc-1")
+            check("the email is lowercased, as every other path stores it", id.email == "me@example.com")
+            check("the organization rides along", id.orgId == "org-1" && id.orgName == "SeedWebs")
+            // This endpoint and claude.ai word the tier differently for one org, and
+            // `absorb` is last-writer-wins — so sending both would make the badge alternate.
+            check("the plan is deliberately not carried", id.plan == nil)
+        } else { failed += 1; print("  ✗  a well-formed profile did not parse") }
+
+        check("the tier is still available for display",
+              QuotaAPI.tier(fromProfile: Data(profile.utf8)) == "default_claude_max_5x")
+        check("a profile that names nobody is not an identity",
+              QuotaAPI.identity(fromProfile: Data(#"{"account":{},"organization":{"uuid":"o"}}"#.utf8)) == nil)
+
+        print("\n▸ QuotaAPI — /api/oauth/usage")
+        // Trimmed from a real response, nulls and all: the retired `seven_day_*` fields
+        // still arrive, and `extra_usage` carries nulls rather than zeros while it is off.
+        let usage = """
+        {"five_hour":{"utilization":69.0,"resets_at":"2026-09-01T11:30:00.236607+00:00"},
+         "seven_day":{"utilization":9.0,"resets_at":"2026-09-07T17:00:00.236628+00:00"},
+         "seven_day_opus":null,"seven_day_sonnet":null,"nimbus_quill":{"utilization":0.0},
+         "extra_usage":{"is_enabled":false,"monthly_limit":null,"used_credits":null,"currency":"USD"},
+         "limits":[
+           {"kind":"session","group":"session","percent":69,"resets_at":"2026-09-01T11:30:00.236607+00:00"},
+           {"kind":"weekly_all","group":"weekly","percent":9},
+           {"kind":"weekly_scoped","group":"weekly","percent":35,
+            "resets_at":"2026-09-07T17:00:00+00:00","scope":{"model":{"display_name":"Fable"}}},
+           {"kind":"weekly_scoped","percent":7,"scope":{"model":{"display_name":"Claude Design"}}},
+           {"kind":"weekly_scoped","percent":1,"scope":{}}
+         ]}
+        """
+        let observed = Date(timeIntervalSince1970: 1_788_260_000)
+        let read = QuotaAPI.reading(fromUsage: Data(usage.utf8), observedAt: observed)
+        check("the session ceiling keeps its fractional percentage",
+              read.limits[LimitID.fiveHour]?.pct == 69)
+        check("its ISO reset parses",
+              read.limits[LimitID.fiveHour]?.resetsAt != nil)
+        check("the weekly ceiling comes through", read.limits[LimitID.sevenDay]?.pct == 9)
+        check("a per-model cap is keyed by slug", read.limits["weekly:fable"]?.pct == 35)
+        check("and carries the name to display", read.limits["weekly:fable"]?.label == "Fable")
+        check("a multi-word model name survives slugging",
+              read.limits["weekly:claude-design"]?.label == "Claude Design")
+        check("a scoped entry naming no model is dropped", read.limits.count == 4)
+        check("the retired seven_day_* nulls invent nothing",
+              read.limits["weekly:opus"] == nil && read.limits["weekly:sonnet"] == nil)
+        // A top-level key we have never heard of is not a limit just because it is shaped
+        // like one; only `limits[]` may add rows.
+        check("an unknown top-level block is ignored", read.limits["nimbus_quill"] == nil)
+        check("every reading is stamped with the observation time",
+              read.limits.values.allSatisfy { $0.observedAt == observed })
+        check("and attributed to the API", read.limits.values.allSatisfy { $0.source == .api })
+        check("extra usage reads as off", read.extra?.enabled == false)
+        check("its nulls become zero rather than dropping the block",
+              read.extra?.used == 0 && read.extra?.limit == 0)
+        check("its currency survives", read.extra?.currency == "USD")
+
+        check("a body that is not JSON yields nothing",
+              QuotaAPI.reading(fromUsage: Data("nope".utf8), observedAt: observed).limits.isEmpty)
+        check("a body with no limit we understand yields nothing",
+              QuotaAPI.reading(fromUsage: Data(#"{"spend":{"percent":0}}"#.utf8), observedAt: observed)
+                  .limits.isEmpty)
+
+        print("\n▸ Model caps retire per source, not across sources")
+        // The extension and the API both list caps but poll on their own clocks, so one
+        // dropping Opus must not erase the other's live Opus reading.
+        func capped(_ source: ReadingSource, _ at: Date) -> LimitReading {
+            LimitReading(pct: 20, resetsAt: nil, observedAt: at, source: source, label: "Opus")
+        }
+        let long = Date(timeIntervalSince1970: 1_788_000_000)   // older than the retirement age
+        var row = AccountSnapshot(key: "acct:1")
+        row.limits["weekly:opus"] = capped(.ext, long)
+        row.absorb(IncomingReport(source: .api, browser: nil, accountUuid: "1", email: nil,
+                                  orgId: nil, orgName: nil, plan: nil,
+                                  limits: [LimitID.fiveHour: LimitReading(pct: 1, resetsAt: nil,
+                                                                          observedAt: observed,
+                                                                          source: .api, label: nil)],
+                                  extra: nil, receivedAt: observed))
+        check("an API report leaves the extension's cap alone", row.limits["weekly:opus"] != nil)
+
+        row.limits["weekly:opus"] = capped(.api, long)
+        row.absorb(IncomingReport(source: .ext, browser: "Menn", accountUuid: "1", email: nil,
+                                  orgId: nil, orgName: nil, plan: nil,
+                                  limits: [LimitID.fiveHour: LimitReading(pct: 1, resetsAt: nil,
+                                                                          observedAt: observed,
+                                                                          source: .ext, label: nil)],
+                                  extra: nil, receivedAt: observed))
+        check("an extension report leaves the API's cap alone", row.limits["weekly:opus"] != nil)
+
+        row.limits["weekly:opus"] = capped(.api, long)
+        row.absorb(IncomingReport(source: .api, browser: nil, accountUuid: "1", email: nil,
+                                  orgId: nil, orgName: nil, plan: nil,
+                                  limits: [LimitID.fiveHour: LimitReading(pct: 1, resetsAt: nil,
+                                                                          observedAt: observed,
+                                                                          source: .api, label: nil)],
+                                  extra: nil, receivedAt: observed))
+        check("but it does retire its own stale cap", row.limits["weekly:opus"] == nil)
+        check("the API earns a badge of its own",
+              row.sourceBadges(rowLabel: "Menn", at: observed).contains("API"))
+
+        print("\n▸ A profile identity settles the status line outright")
+        // The case the file-based rule refuses: `oauthAccount` names one account, the
+        // cached block another, and the seven-day windows do not line up — so nothing in
+        // the file ties either account to these numbers.
+        let statusline = """
+        {"rate_limits":{"five_hour":{"used_percentage":69,"resets_at":1788262200},
+                        "seven_day":{"used_percentage":9,"resets_at":1788800400}}}
+        """
+        let ambiguous = CLIIdentity(
+            accountUuid: "from-claude-json", email: "stale@example.com",
+            orgId: "org-stale", orgName: "Stale Org", plan: "default_claude_max_20x",
+            credential: CLIIdentity.Credential(accountUuid: "from-token",
+                                               sevenDayResetsAt: Date(timeIntervalSince1970: 1)))
+        check("with only the file to go on, the reading is dropped rather than guessed at",
+              Ingest.cliReport(statuslineJSON: Data(statusline.utf8),
+                               identity: ambiguous, observedAt: observed) == nil)
+
+        // What `/api/oauth/profile` hands back: the credential's own account, with no
+        // cached block to be weighed against, so it is taken at its word.
+        let fromProfile = CLIIdentity(accountUuid: "from-token", email: "real@example.com",
+                                      orgId: "org-real", orgName: "Real Org", plan: nil)
+        if let r = Ingest.cliReport(statuslineJSON: Data(statusline.utf8),
+                                    identity: fromProfile, observedAt: observed) {
+            check("the same reading now lands, on the token's account",
+                  r.preferredKey == "acct:from-token")
+            check("with the profile's email", r.email == "real@example.com")
+            check("and its organization", r.orgId == "org-real" && r.orgName == "Real Org")
+            check("carrying the numbers untouched", r.limits[LimitID.fiveHour]?.pct == 69)
+            check("as a CLI reading, not an API one", r.source == .cli)
+        } else { failed += 1; print("  ✗  a profile identity did not produce a report") }
 
         print("\n\(passed) passed, \(failed) failed\n")
         return failed == 0 ? 0 : 1

@@ -60,7 +60,15 @@ reading and wins for being newer.
 The alternative was to read Claude Code's keychain item and ask `/api/oauth/profile` who the
 token belongs to. That is authoritative, and it costs a keychain prompt on every rebuild of an
 ad-hoc signed app, makes this the app's only outbound request, and puts a live access token on
-the wire for a menu bar widget. Both accounts were already in a file being read once a second.
+the wire for a menu bar widget. Both accounts were already in a file being read once a second —
+so the inference above is what runs by default, and it is not worth those costs on its own.
+
+It is worth them once the user has already paid them for something else. The quota API source
+(**ตั้งค่า… → ในเครื่อง → quota API**, off by default) reads that keychain item and asks that
+endpoint anyway, for the per-model ceilings and extra-usage credits the status line does not
+carry. While it is on, its answer replaces the inference outright rather than being weighed
+against it — including in the case above where the file cannot decide and the reading is
+dropped. The inference stays as what runs when it is off, which is most installs.
 
 What this does not prove is that the block's uuid always owns the block's own numbers — it did
 on the machine this was found on, twice over, but the guard above inherits that assumption. If
