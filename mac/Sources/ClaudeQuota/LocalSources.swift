@@ -3,7 +3,7 @@ import Foundation
 /// Watches the three files on this machine that tell us something useful:
 ///
 ///  - `cli.json`         — the statusline shim's dump of Claude Code's live session JSON
-///  - `~/.claude.json`   — which account the CLI is logged in as
+///  - `~/.claude.json`   — whose account the CLI's credential belongs to
 ///  - `stats-cache.json` — token and message totals Claude Code already computed
 ///
 /// Deliberately mtime polling rather than FSEvents. The statusline shim rewrites
@@ -74,9 +74,11 @@ final class LocalSources {
         (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date
     }
 
-    /// Who the CLI is signed in as. The same file also caches the last quota response
-    /// Claude Code fetched, and it is deliberately *not* read — see the note on
-    /// `cachedUsageUtilization` in `../../README.md`.
+    /// Who the CLI is working as. Two blocks of the file answer that and can disagree,
+    /// so both are read on the same pass — see `CLIIdentity`. The percentages cached
+    /// beside them are still not read: the note on `cachedUsageUtilization` in
+    /// `mac/README.md` says why quota from there cannot be trusted even now that its
+    /// account uuid can.
     private func refreshClaudeConfig() {
         guard let m = Self.modified(Paths.claudeConfig), m != configStamp else { return }
         configStamp = m

@@ -88,6 +88,16 @@ request cannot hold a file descriptor, or crowd out the request that matters.
 ## The status line source
 
 The shim writes Claude Code's status line payload verbatim to `cli.json`. The app reads only
-`rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}` from it, takes the observation
-time from the file's mtime, and takes the account identity from `oauthAccount` in
-`~/.claude.json`. A half-written file simply fails to parse and is picked up on the next tick.
+`rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}` from it and takes the observation
+time from the file's mtime. A half-written file simply fails to parse and is picked up on the
+next tick.
+
+The payload names no account, so identity comes from `~/.claude.json` — from two blocks of it,
+because they can name different accounts. `oauthAccount` says who Claude Code last looked up and
+is the only place the email, organization and plan live; `cachedUsageUtilization.accountUuid`
+says who the credential in use last fetched quota as. When they agree the identity stands. When
+they disagree, the credential wins — but only if the seven-day reset instant cached beside it
+matches the one the status line just sent, within a second; otherwise the report is dropped
+rather than filed under a guess. A corrected identity carries the uuid alone, since the details
+beside it in the file belong to the other account. See `mac/README.md` for why the keychain is
+not consulted instead.

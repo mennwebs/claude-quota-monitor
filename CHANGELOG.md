@@ -4,6 +4,30 @@ All notable changes to Claude Quota Monitor are documented here.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **The Mac app put Claude Code's quota on the wrong account's card.** The status line payload
+  names no account, so the app took one from `oauthAccount` in `~/.claude.json` — which says who
+  Claude Code last *looked up*, not whose credential it is *using*. On the machine this was found
+  on the two had disagreed since July, and one account's 5h and 7d readings had been overwriting
+  another's for weeks, winning every merge for being the freshest thing on the row.
+
+  Identity now comes from `cachedUsageUtilization.accountUuid`, which is stamped with the account
+  the quota response actually came back for, cross-checked against `oauthAccount`. Agreeing uuids
+  stand. A disagreement is settled by the seven-day reset instant: the cached block and the status
+  line have to be describing the same week, or the report is dropped instead of filed under a
+  guess. A corrected identity carries the uuid alone — the email, organization and plan beside it
+  belong to the other account. Reading Claude Code's keychain item and asking `/api/oauth/profile`
+  would have been authoritative and was not taken: it costs a keychain prompt on every rebuild of
+  an ad-hoc signed app and would make this the app's only outbound request. `mac/README.md` has
+  the reasoning.
+
+  A row already holding the wrong numbers heals itself — the extension reports the same two
+  ceilings for that account, and the next push is newer.
+
+---
+
 ## [1.8] — 2026-09-01
 
 ### Added

@@ -80,6 +80,10 @@ enum Ingest {
     /// render, which makes the local CLI account the freshest source we have — no
     /// polling and no request to claude.ai. It carries no account identity and no
     /// Opus ceiling, so identity comes from `~/.claude.json` and Opus from the extension.
+    ///
+    /// Because the payload names nobody, attribution is the whole risk here: a number
+    /// filed under the wrong account is not a gap in the panel, it is a lie on it. See
+    /// `CLIIdentity.attribution(sevenDayResetsAt:)`.
     static func cliReport(statuslineJSON data: Data,
                           identity: CLIIdentity?,
                           observedAt: Date,
@@ -107,14 +111,25 @@ enum Ingest {
         }
         guard !limits.isEmpty else { return nil }
 
+        // With no `~/.claude.json` there is nothing to file this under at all. `Store`
+        // would drop it a moment later for the same reason; refusing here keeps every
+        // decision about who these numbers belong to in one place.
+        guard let identity else { return nil }
+
+        let who: CLIIdentity
+        switch identity.attribution(sevenDayResetsAt: limits[LimitID.sevenDay]?.resetsAt) {
+        case .confirmed(let id), .unconfirmed(let id), .corrected(let id): who = id
+        case .refused: return nil
+        }
+
         return IncomingReport(
             source: .cli,
             browser: nil,
-            accountUuid: identity?.accountUuid,
-            email: identity?.email?.lowercased(),
-            orgId: identity?.orgId,
-            orgName: identity?.orgName,
-            plan: identity?.plan,
+            accountUuid: who.accountUuid,
+            email: who.email?.lowercased(),
+            orgId: who.orgId,
+            orgName: who.orgName,
+            plan: who.plan,
             limits: limits,
             extra: nil,
             receivedAt: receivedAt
@@ -144,13 +159,38 @@ enum Ingest {
     private static func clampPct(_ v: Double) -> Double { min(100, max(0, v)) }
 }
 
-/// Who the local `claude` CLI is logged in as, read from `~/.claude.json`.
+/// Who the local `claude` CLI is working as, read from `~/.claude.json`.
+///
+/// Two blocks of that file describe an account and they can name different ones.
+/// `oauthAccount` is the profile Claude Code last fetched, and it is the only place the
+/// email, organization and plan live. `cachedUsageUtilization` is the quota response
+/// Claude Code last fetched *with the credential it is actually using*, and it carries
+/// nothing but the account uuid that response belonged to.
+///
+/// They disagreed on the machine this was found on, and had for weeks: `oauthAccount`
+/// named one account while every status line reading — reset instants included —
+/// belonged to another. `oauthAccount` alone therefore does not answer whose quota the
+/// status line is reporting; it answers who Claude Code last looked up.
 struct CLIIdentity: Equatable, Sendable {
     var accountUuid: String?
     var email: String?
     var orgId: String?
     var orgName: String?
     var plan: String?
+    /// What the credential in use last answered to. nil only when Claude Code has never
+    /// fetched usage on this machine — the one case with nothing to cross-check against.
+    var credential: Credential?
+
+    /// The part of `cachedUsageUtilization` that says *whose* it is. The percentages
+    /// beside it are still not read; see `mac/README.md`.
+    struct Credential: Equatable, Sendable {
+        var accountUuid: String?
+        /// The seven-day reset instant from that same response. A week-long window sits
+        /// at its own instant per account and does not move while it runs, so it is what
+        /// ties a cached account uuid to a live status line — the five-hour one cannot,
+        /// because it rolls every five hours and this block is routinely hours old.
+        var sevenDayResetsAt: Date?
+    }
 
     /// `~/.claude.json` is large (hundreds of KB of unrelated project history) but
     /// only changes when Claude Code writes it, so this runs on an mtime change, not a timer.
@@ -160,17 +200,76 @@ struct CLIIdentity: Equatable, Sendable {
     }
 
     /// Taken as bytes so the caller can parse the file once: it is hundreds of KB, and
-    /// the usage block beside `oauthAccount` is read on the same pass.
+    /// both blocks are read on the same pass.
     static func read(from data: Data) -> CLIIdentity? {
-        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let acct = root["oauthAccount"] as? [String: Any]
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return nil }
+        let acct = root["oauthAccount"] as? [String: Any]
+        let credential = readCredential(root)
+        // Either block on its own is worth something: one names the account, the other
+        // proves which account the credential belongs to.
+        guard acct != nil || credential != nil else { return nil }
         return CLIIdentity(
-            accountUuid: acct["accountUuid"] as? String,
-            email: acct["emailAddress"] as? String,
-            orgId: acct["organizationUuid"] as? String,
-            orgName: acct["organizationName"] as? String,
-            plan: (acct["userRateLimitTier"] as? String) ?? (acct["organizationRateLimitTier"] as? String)
+            accountUuid: acct?["accountUuid"] as? String,
+            email: acct?["emailAddress"] as? String,
+            orgId: acct?["organizationUuid"] as? String,
+            orgName: acct?["organizationName"] as? String,
+            plan: (acct?["userRateLimitTier"] as? String) ?? (acct?["organizationRateLimitTier"] as? String),
+            credential: credential
         )
     }
+
+    private static func readCredential(_ root: [String: Any]) -> Credential? {
+        guard let cached = root["cachedUsageUtilization"] as? [String: Any] else { return nil }
+        let sevenDay = (cached["utilization"] as? [String: Any])?[LimitID.sevenDay] as? [String: Any]
+        let c = Credential(accountUuid: cached["accountUuid"] as? String,
+                           sevenDayResetsAt: parseFlexibleDate(sevenDay?["resets_at"]))
+        return c.accountUuid == nil && c.sevenDayResetsAt == nil ? nil : c
+    }
+
+    /// A cached reset instant and a live one describe the same window when they land
+    /// this close: the API writes a fractional ISO string and the status line whole
+    /// unix seconds, so the same window reads a fraction of a second apart.
+    static let sameWindowTolerance: TimeInterval = 2
+
+    /// Whose quota the status line is reporting, given the seven-day reset it just sent.
+    ///
+    /// The cheap check would be to take `oauthAccount` and hope. The authoritative one
+    /// would be to read Claude Code's keychain item and ask `/api/oauth/profile` who the
+    /// token belongs to — which costs a keychain prompt on every rebuild of an ad-hoc
+    /// signed app, makes this the app's only outbound request, and would put a live
+    /// access token on the wire for a menu bar widget. This does neither: both accounts
+    /// are already in the file, and the reset instant says which of them the numbers
+    /// came from.
+    func attribution(sevenDayResetsAt reset: Date?) -> CLIAttribution {
+        guard let credentialUuid = credential?.accountUuid, !credentialUuid.isEmpty else {
+            return .unconfirmed(self)
+        }
+        if credentialUuid == accountUuid { return .confirmed(self) }
+        guard let cached = credential?.sevenDayResetsAt, let reset,
+              abs(cached.timeIntervalSince(reset)) <= Self.sameWindowTolerance
+        else { return .refused }
+        // Only the uuid travels. The email, organization and plan sitting beside it in
+        // the file belong to the account `oauthAccount` names, and carrying them across
+        // would put the wrong person's name on the right row. The extension fills them
+        // in for any account it reports.
+        return .corrected(CLIIdentity(accountUuid: credentialUuid, credential: credential))
+    }
+}
+
+/// What may be done with a `CLIIdentity`, given the numbers in hand.
+enum CLIAttribution: Equatable, Sendable {
+    /// `oauthAccount` and the credential name the same account. Full identity.
+    case confirmed(CLIIdentity)
+    /// Nothing in the file names the credential's account, so `oauthAccount` is taken at
+    /// its word — which is what this used to do unconditionally.
+    case unconfirmed(CLIIdentity)
+    /// `oauthAccount` names somebody else, and the cached quota response is holding the
+    /// same seven-day window the status line just reported — so the credential's account
+    /// owns these numbers. Its uuid is used, on its own.
+    case corrected(CLIIdentity)
+    /// The two disagree and nothing ties either account to these numbers. No row: a
+    /// missing row is a gap the next report closes, a wrong one silently overwrites a
+    /// correct reading and wins the merge for being newer.
+    case refused
 }

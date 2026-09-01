@@ -187,6 +187,123 @@ enum SelfTest {
             check("a flood of invented models is capped", r.limits.count == Ingest.maxLimitsPerReport)
         } else { failed += 1; print("  ✗  flood report rejected outright") }
 
+        print("\n▸ CLI identity — the status line names nobody, so `~/.claude.json` does")
+        // What actually happened: `oauthAccount` named one account for weeks while every
+        // status line reading belonged to another. The CLI's numbers landed on the wrong
+        // card and won every merge there, because they were the freshest thing on it.
+        let menn = "3a8f97c3-f7bc-4bd2-bd71-dd0197737884"
+        let seed = "85eb22d5-8ee2-4b52-a21e-4792186592dd"
+        // Both taken from the machine this was found on: the cached block's fractional
+        // ISO and the status line's whole seconds are the same seven-day window, 0.28s apart.
+        let cachedSevenDay = "2026-09-07T16:59:59.719144+00:00"
+        let liveSevenDay: TimeInterval = 1_788_800_400
+
+        func claudeConfig(oauth: String?, email: String = "m@menn.me",
+                          cached: String?, cachedReset: String?) -> Data {
+            var blocks: [String] = []
+            if let oauth {
+                blocks.append("""
+                "oauthAccount":{"accountUuid":"\(oauth)","emailAddress":"\(email)",
+                 "organizationUuid":"org-of-\(email)","organizationName":"\(email)'s Organization",
+                 "organizationRateLimitTier":"default_claude_max_20x"}
+                """)
+            }
+            if let cached {
+                blocks.append("""
+                "cachedUsageUtilization":{"fetchedAtMs":1788244466824,"accountUuid":"\(cached)",
+                 "utilization":{"five_hour":{"utilization":0,"resets_at":null},
+                                "seven_day":{"utilization":0,
+                                             "resets_at":\(cachedReset.map { "\"\($0)\"" } ?? "null")}}}
+                """)
+            }
+            // Wrapped in unrelated keys, because the real file is hundreds of KB of them.
+            return Data("{\"numStartups\":91,\(blocks.joined(separator: ","))}".utf8)
+        }
+
+        func attribution(oauth: String?, cached: String?, cachedReset: String? = cachedSevenDay,
+                         liveReset: TimeInterval? = liveSevenDay) -> CLIAttribution? {
+            CLIIdentity.read(from: claudeConfig(oauth: oauth, cached: cached, cachedReset: cachedReset))?
+                .attribution(sevenDayResetsAt: liveReset.map { Date(timeIntervalSince1970: $0) })
+        }
+
+        check("the cached reset parses out of its fractional ISO form",
+              CLIIdentity.read(from: claudeConfig(oauth: menn, cached: seed, cachedReset: cachedSevenDay))?
+                  .credential?.sevenDayResetsAt
+                  .map { abs($0.timeIntervalSince1970 - 1_788_800_399.719) < 0.01 } == true)
+
+        check("blocks that agree confirm the identity", {
+            guard case .confirmed(let id)? = CLIIdentity
+                .read(from: claudeConfig(oauth: seed, email: "m@seedwebs.com",
+                                         cached: seed, cachedReset: cachedSevenDay))?
+                .attribution(sevenDayResetsAt: Date(timeIntervalSince1970: liveSevenDay))
+            else { return false }
+            return id.accountUuid == seed && id.email == "m@seedwebs.com"
+        }())
+
+        check("a disagreement is settled by the window the numbers came from", {
+            guard case .corrected(let id)? = attribution(oauth: menn, cached: seed) else { return false }
+            return id.accountUuid == seed
+        }())
+        check("and none of the other account's details ride along", {
+            guard case .corrected(let id)? = attribution(oauth: menn, cached: seed) else { return false }
+            return id.email == nil && id.orgId == nil && id.orgName == nil && id.plan == nil
+        }())
+        check("a second of rounding between the two is still the same window", {
+            guard case .corrected? = attribution(oauth: menn, cached: seed,
+                                                 liveReset: liveSevenDay + 1) else { return false }
+            return true
+        }())
+        check("a window a minute and a half away is not",
+              attribution(oauth: menn, cached: seed, liveReset: liveSevenDay + 100) == .refused)
+        check("nor is another account's seven-day window",
+              attribution(oauth: menn, cached: seed, liveReset: 1_788_663_599) == .refused)
+        check("a disagreement with no cached reset to check is refused",
+              attribution(oauth: menn, cached: seed, cachedReset: nil) == .refused)
+        check("as is one where the status line sent no seven-day window at all",
+              attribution(oauth: menn, cached: seed, liveReset: nil) == .refused)
+
+        check("with no cached block there is nothing to check against", {
+            guard case .unconfirmed(let id)? = attribution(oauth: menn, cached: nil) else { return false }
+            return id.accountUuid == menn && id.plan == "default_claude_max_20x"
+        }())
+        check("a file with neither block is no identity at all",
+              CLIIdentity.read(from: claudeConfig(oauth: nil, cached: nil, cachedReset: nil)) == nil)
+        check("a cached block with no oauthAccount beside it still has to match the window", {
+            guard case .corrected(let id)? = attribution(oauth: nil, cached: seed) else { return false }
+            return id.accountUuid == seed
+        }())
+
+        // End to end, through the thing `LocalSources` actually calls.
+        let cliObserved = Date(timeIntervalSince1970: 1_788_263_041)
+        func statusline(sevenDayResetsAt: TimeInterval = liveSevenDay) -> Data {
+            Data("""
+            {"session_id":"s","version":"2.1.252","rate_limits":{
+               "five_hour":{"used_percentage":3,"resets_at":1788280200},
+               "seven_day":{"used_percentage":11,"resets_at":\(Int(sevenDayResetsAt))}}}
+            """.utf8)
+        }
+        func cliReport(oauth: String?, cached: String?,
+                       sevenDayResetsAt: TimeInterval = liveSevenDay) -> IncomingReport? {
+            Ingest.cliReport(
+                statuslineJSON: statusline(sevenDayResetsAt: sevenDayResetsAt),
+                identity: CLIIdentity.read(from: claudeConfig(oauth: oauth, cached: cached,
+                                                              cachedReset: cachedSevenDay)),
+                observedAt: cliObserved, receivedAt: cliObserved)
+        }
+        check("the report lands on the account whose window it describes",
+              cliReport(oauth: menn, cached: seed)?.accountUuid == seed)
+        check("carrying no email to relabel that row with",
+              cliReport(oauth: menn, cached: seed)?.email == nil)
+        check("and still carrying the numbers",
+              cliReport(oauth: menn, cached: seed)?.limits[LimitID.fiveHour]?.pct == 3)
+        check("a report that cannot be attributed is never produced",
+              cliReport(oauth: menn, cached: seed, sevenDayResetsAt: 1_788_663_599) == nil)
+        check("nor is one with no ~/.claude.json behind it",
+              Ingest.cliReport(statuslineJSON: statusline(), identity: nil,
+                               observedAt: cliObserved, receivedAt: cliObserved) == nil)
+        check("the agreeing case still carries the whole identity",
+              cliReport(oauth: seed, cached: seed)?.orgName == "m@menn.me's Organization")
+
         print("\n▸ Limit — display names")
         func limit(_ id: String, _ label: String?) -> Limit {
             Limit(id: id, reading: LimitReading(pct: 0, resetsAt: nil, observedAt: Date(),
