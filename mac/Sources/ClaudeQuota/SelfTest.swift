@@ -788,6 +788,27 @@ enum SelfTest {
             check("as a CLI reading, not an API one", r.source == .cli)
         } else { failed += 1; print("  ✗  a profile identity did not produce a report") }
 
+        print("\n▸ An empty panel offers the route this machine can actually take")
+        func hint(login: Bool, on: Bool, _ st: APISource.Status = .off) -> String? {
+            PanelView.EmptyStateHint.cli(sawClaudeCodeLogin: login, apiEnabled: on, apiStatus: st)
+        }
+        // The case this exists for: Claude Code is here, no browser profile is reporting,
+        // and the panel used to name only the extension — which reads as "not for you".
+        check("Claude Code signed in and the source off — it is offered",
+              hint(login: true, on: false)?.contains("quota API") == true)
+        check("no Claude Code on this machine — nothing is offered",
+              hint(login: false, on: false) == nil)
+        check("a switch already on is not offered again",
+              hint(login: true, on: true, .ok(account: "a", org: nil, tier: nil, at: Date())) == nil)
+        check("nor while its first answer is still coming", hint(login: true, on: true, .waiting) == nil)
+        // Expired is Claude Code's to fix by running; these are the user's to clear, and
+        // an empty panel with no route to the reason it is empty is a dead end.
+        check("an expired token needs no instruction here", hint(login: true, on: true, .expired) == nil)
+        check("a declined keychain points at settings",
+              hint(login: true, on: true, .denied)?.contains("ตั้งค่า") == true)
+        check("so does a missing credential", hint(login: true, on: true, .noCredential) != nil)
+        check("and an outright failure", hint(login: true, on: true, .failed("HTTP 500")) != nil)
+
         print("\n\(passed) passed, \(failed) failed\n")
         return failed == 0 ? 0 : 1
     }

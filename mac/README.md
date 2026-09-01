@@ -13,17 +13,31 @@ just read the session quota.
 
 ## Where the numbers come from
 
-Two sources, merged per account, newest observation wins per limit.
+Three sources, merged per account, newest observation wins per limit. Any one of them is enough
+to fill the panel; none of them is required.
 
 **1. The browser.** The Claude Quota Monitor fork in the parent directory posts what it already
 reads from `claude.ai` to `127.0.0.1`. One Chrome profile per account; each profile reports the
-account it is signed in as.
+account it is signed in as. This is the only source that can watch more than one account.
 
-**2. Claude Code on this machine.** Claude Code hands its status line command a JSON blob on
+**2. Claude Code's status line.** Claude Code hands its status line command a JSON blob on
 every render containing the live `rate_limits`, and a shim copies it to a file. No API call, no
 polling, no extra process, and it is the freshest source there is — but only while something is
 rendering a status line, which means Claude Code in a terminal. In the desktop app the shim
-never runs at all, and the local source simply goes quiet.
+never runs at all, and the local source simply goes quiet. It carries the two structural
+ceilings and nothing else.
+
+**3. The quota API** (off by default). The endpoint Claude Code's own `/usage` calls, read with
+the OAuth token in the login keychain. Same document claude.ai serves the extension, so it
+carries the per-model ceilings and extra-usage credits the status line does not — for the one
+account Claude Code is signed in as, around the clock.
+
+That third one is what lets this app stand alone: **someone who lives in the terminal and never
+opens claude.ai in a browser does not need the extension at all.** It is off by default because
+it reads a credential belonging to another application, and read-only permanently because
+renewing an access token rotates the refresh token and would log Claude Code out. It cannot
+replace the browser for *several* accounts — one keychain holds one login, and a token no
+Claude Code run renews goes stale within hours.
 
 ### What `cachedUsageUtilization` is read for, and what it is not
 
@@ -69,6 +83,12 @@ endpoint anyway, for the per-model ceilings and extra-usage credits the status l
 carry. While it is on, its answer replaces the inference outright rather than being weighed
 against it — including in the case above where the file cannot decide and the reading is
 dropped. The inference stays as what runs when it is off, which is most installs.
+
+The prompt is real and was measured, not assumed: a rebuilt debug binary reading the item
+raises `SecurityAgent` and the read blocks until it is answered. That is the ad-hoc signature
+changing on every build, so during development it recurs per build; an installed copy is
+answered once. The read runs on the source's own queue, so a prompt left sitting never blocks
+the panel, and a declined one stops the poll rather than asking again on a timer.
 
 What this does not prove is that the block's uuid always owns the block's own numbers — it did
 on the machine this was found on, twice over, but the guard above inherits that assumption. If

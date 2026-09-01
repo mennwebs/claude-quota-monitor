@@ -102,11 +102,47 @@ struct PanelView: View {
 
     // MARK: - Empty state
 
+    /// What an empty panel offers, as a rule rather than a view, so `--selftest` can hold
+    /// it to the case it exists for: a machine with Claude Code and no browser profile
+    /// used to be told only about the extension, which reads as "this app is not for you".
+    enum EmptyStateHint {
+        static func cli(sawClaudeCodeLogin: Bool,
+                        apiEnabled: Bool,
+                        apiStatus: APISource.Status) -> String?
+        {
+            // Nothing to offer on a machine that has never signed Claude Code in — a
+            // switch that cannot work is worse than no suggestion.
+            guard sawClaudeCodeLogin else { return nil }
+
+            guard apiEnabled else {
+                return "เครื่องนี้มี Claude Code ล็อกอินอยู่ — เปิด “quota API” ในตั้งค่าเพื่ออ่านโควต้าของบัญชีนั้นได้เลย ไม่ต้องใช้เบราว์เซอร์"
+            }
+            // Already on, and stuck on something only the user can clear. Saying nothing
+            // here would leave an empty panel with no route to the reason it is empty.
+            switch apiStatus {
+            case .denied, .noCredential, .failed:
+                return "quota API เปิดอยู่แต่ยังอ่านไม่ได้ · ดูสถานะในตั้งค่า"
+            // Waiting, expired or working: the next poll speaks for itself.
+            case .off, .waiting, .ok, .expired, .unauthorized:
+                return nil
+            }
+        }
+    }
+
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("ยังไม่มีข้อมูล")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.ink)
+            // Offered first, because someone who has Claude Code and no browser profile
+            // signed in would otherwise read the extension hint as "this app is not for
+            // you" and close the panel — which is exactly what it used to say to them.
+            if let hint = cliHint {
+                Text(hint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text(statusHint)
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.inkMuted)
@@ -116,10 +152,18 @@ struct PanelView: View {
         .padding(12)
     }
 
+    private var cliHint: String? {
+        EmptyStateHint.cli(sawClaudeCodeLogin: store.sawClaudeCodeLogin,
+                           apiEnabled: store.settings.readQuotaAPI,
+                           apiStatus: store.apiStatus)
+    }
+
     private var statusHint: String {
         switch store.serverState {
         case .listening(let port):
-            return "ใส่ token ในหน้าตั้งค่าของ extension ในแต่ละโปรไฟล์ · รออยู่ที่ 127.0.0.1:\(port)"
+            // "หรือ" only once something has been offered above it.
+            let lead = cliHint == nil ? "ใส่" : "หรือใส่"
+            return "\(lead) token ในหน้าตั้งค่าของ extension ในแต่ละโปรไฟล์ · รออยู่ที่ 127.0.0.1:\(port)"
         case .failed(let message):
             return "เปิดพอร์ตไม่ได้: \(message)"
         case .stopped:

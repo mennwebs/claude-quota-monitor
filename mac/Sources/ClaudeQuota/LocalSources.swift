@@ -13,6 +13,10 @@ import Foundation
 final class LocalSources {
     private let onCLIReport: @Sendable (IncomingReport) -> Void
     private let onStats: @Sendable (CLIStats?) -> Void
+    /// Whether `~/.claude.json` names an account at all — that is, whether Claude Code
+    /// has ever signed in on this machine. The panel uses it to know there is a second
+    /// way in worth offering, without going near the keychain to find out.
+    private let onCLIPresence: @Sendable (Bool) -> Void
 
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "com.mennwebs.cqm.local")
@@ -28,9 +32,11 @@ final class LocalSources {
     private var wantStats = true
 
     init(onCLIReport: @escaping @Sendable (IncomingReport) -> Void,
-         onStats: @escaping @Sendable (CLIStats?) -> Void) {
+         onStats: @escaping @Sendable (CLIStats?) -> Void,
+         onCLIPresence: @escaping @Sendable (Bool) -> Void) {
         self.onCLIReport = onCLIReport
         self.onStats = onStats
+        self.onCLIPresence = onCLIPresence
     }
 
     /// Who the OAuth credential on this machine really belongs to, once the quota API
@@ -98,6 +104,9 @@ final class LocalSources {
         configStamp = m
         guard let data = try? Data(contentsOf: Paths.claudeConfig) else { return }
         identity = CLIIdentity.read(from: data)
+        // Signing in rewrites this file, so a machine that gains Claude Code while the
+        // app is open is noticed within the second rather than at the next launch.
+        onCLIPresence(identity?.accountUuid != nil)
     }
 
     private func refreshStatusline() {

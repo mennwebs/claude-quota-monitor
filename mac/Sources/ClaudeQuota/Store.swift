@@ -37,6 +37,9 @@ final class Store: ObservableObject {
     @Published private(set) var stats: CLIStats?
     @Published private(set) var serverState: LoopbackServer.ServerState = .stopped
     @Published private(set) var apiStatus: APISource.Status = .off
+    /// Claude Code has signed in on this machine at some point — `~/.claude.json` names
+    /// an account. Says nothing about the keychain, and deliberately does not ask it.
+    @Published private(set) var sawClaudeCodeLogin = false
     @Published private(set) var now = Date()
     @Published var settings: AppSettings {
         didSet { onSettingsChanged(from: oldValue) }
@@ -79,6 +82,9 @@ final class Store: ObservableObject {
             },
             onStats: { [weak self] s in
                 Task { @MainActor [weak self] in self?.stats = s }
+            },
+            onCLIPresence: { [weak self] present in
+                Task { @MainActor [weak self] in self?.sawClaudeCodeLogin = present }
             }
         )
         api = APISource(

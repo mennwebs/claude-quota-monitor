@@ -24,6 +24,14 @@ All notable changes to Claude Quota Monitor are documented here.
   every source does.
 - Pressing Refresh now actually refreshes this source. The browser can only be *asked*, through
   a flag it answers on its own minute; this source is local, so it just fetches.
+- **An empty panel now offers the route this machine can take.** It named only the extension,
+  so someone who lives in Claude Code and has no browser profile signed in read it as "this app
+  is not for you" and closed it. When Claude Code has signed in here and the quota API source
+  is still off, the panel says so first and the extension line follows as the alternative. When
+  the source is on but stuck on something only the user can clear — a declined keychain, no
+  credential — it points at Settings rather than leaving an empty panel with no route to the
+  reason it is empty. Whether Claude Code has signed in is read from `~/.claude.json`, which is
+  already polled; the keychain is not touched to decide what to suggest.
 
 ### Fixed
 - **A new field in `settings.json` silently wiped every setting.** `AppSettings.load()` answers
