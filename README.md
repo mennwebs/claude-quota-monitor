@@ -137,6 +137,7 @@ claude-quota-monitor/
 ├── manifest.json          # Extension manifest (MV3)
 ├── background.js          # Service worker — refresh scheduler, badge updates
 ├── bridge.js              # macOS menu bar bridge — loopback push (opt-in)
+├── usage.js               # Reads claude.ai's /usage document; shared by worker and content script
 ├── options.html/css/js    # Bridge settings
 ├── content.js             # Injected into claude.ai — captures quota from API
 ├── popup.html/css/js      # Extension popup UI

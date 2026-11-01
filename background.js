@@ -9,7 +9,7 @@
 // Pushing the cached reading to the Mac app costs nothing on claude.ai's side, so it
 // runs far more often than the actual quota fetch. That is what keeps the menu bar
 // within a minute of the truth without adding request volume.
-importScripts('bridge.js');
+importScripts('bridge.js', 'usage.js');
 
 const ALARM = 'quota-poll';
 const POLL_MINUTES = 15;
@@ -31,67 +31,35 @@ async function fetchPlan(orgId) {
   } catch { return null; }
 }
 
-/* Extrai categorias semanais por modelo do array `limits`, com fallback para
- * os campos legados seven_day_*. Mesma lógica do content.js. */
-function extractWeeklyScoped(data) {
-  if (Array.isArray(data.limits) && data.limits.length) {
-    return data.limits
-      .filter(l => l.kind === 'weekly_scoped' && l.scope?.model?.display_name)
-      .map(l => ({
-        name:    l.scope.model.display_name,
-        percent: l.percent ?? 0,
-        resetAt: l.resets_at ?? null
-      }));
-  }
-  return [
-    ['Sonnet', data.seven_day_sonnet],
-    ['Opus',   data.seven_day_opus],
-    ['Design', data.seven_day_omelette],
-  ].filter(([, v]) => v).map(([name, v]) => ({
-    name, percent: v.utilization ?? 0, resetAt: v.resets_at ?? null
-  }));
-}
-
 async function fetchUsage() {
   const { claudeUsage } = await chrome.storage.local.get('claudeUsage');
   const orgId = claudeUsage?.orgId;
   if (!orgId) return; // ainda não visitou claude.ai após instalar
 
+  const { parseUsage, recordFetch } = self.CQMUsage;
   try {
     const res = await fetch(
       `https://claude.ai/api/organizations/${orgId}/usage`,
       { credentials: 'include' }
     );
-    if (!res.ok) return;
-    const data = await res.json();
-
-    const session = data.five_hour;
-    if (!session) return;
-
-    const extra = data.extra_usage ?? null;
-    const weeklyScoped = extractWeeklyScoped(data);
+    if (!res.ok) return recordFetch(false, `http-${res.status}`);
+    const parsed = parseUsage(await res.json().catch(() => null));
+    if (!parsed) return recordFetch(false, 'no-limits');
 
     // Plan only changes on an upgrade/downgrade, so fetch it once and reuse it — this is
     // half the request volume. Clear claudeUsage.plan from storage to force a re-read.
     const plan = claudeUsage?.plan ?? await fetchPlan(orgId);
 
-    chrome.storage.local.set({
+    await chrome.storage.local.set({
       claudeUsage: {
         ...claudeUsage,
-        percent:              session.utilization,
-        resetAt:              session.resets_at,
-        weeklyPercent:        data.seven_day?.utilization,
-        weeklyResetAt:        data.seven_day?.resets_at,
-        weeklyScoped,
-        extraUsageEnabled:    extra?.is_enabled  ?? false,
-        extraUsageUsed:       extra?.used_credits ?? 0,
-        extraUsageLimit:      extra?.monthly_limit ?? 0,
-        extraUsageCurrency:   extra?.currency ?? null,
+        ...parsed,
         ...(plan ? { plan } : {}),
         ts: Date.now()
       }
     });
-  } catch { /* sem conexão ou sessão expirada */ }
+    await recordFetch(true);
+  } catch { await recordFetch(false, 'network'); }
 }
 
 /* ── Ponte para o app da barra de menus do macOS ── */
