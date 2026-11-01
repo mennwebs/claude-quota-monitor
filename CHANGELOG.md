@@ -34,6 +34,16 @@ All notable changes to Claude Quota Monitor are documented here.
   already polled; the keychain is not touched to decide what to suggest.
 
 ### Fixed
+- **A profile whose weekly cap was spent stopped updating, silently.** With the cap at 100%
+  there is no live 5-hour window and the API answers `five_hour: null`; both the service
+  worker and the content script read that as "no reading" and returned without writing, so the
+  profile sat on its last numbers (and the Mac app on that profile's last push) for as long as
+  the cap lasted. A missing window now reads as 0% with no reset time, and the parsing lives
+  in one `usage.js` that both sides load instead of two copies.
+- **The popup now says why a reading is old.** Every early exit in the fetchers was silent, so
+  "updated 24h ago" was all there was to go on. The last fetch's outcome (`http-403`,
+  `no-limits`, `network`) is kept in `usageFetchStatus`, and the popup shows it once a failing
+  fetch has left the reading more than 30 minutes old.
 - **A new field in `settings.json` silently wiped every setting.** `AppSettings.load()` answers
   a thrown decode with defaults and Swift's synthesized `Decodable` ignores property defaults,
   so adding one stored field would have taken the user's account labels, their chosen port and

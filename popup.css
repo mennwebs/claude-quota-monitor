@@ -356,6 +356,8 @@ footer {
   min-height: 20px;
 }
 
+.fetch-problem { color: var(--donate-text); margin-right: auto; }
+
 #sync-btn {
   display: flex;
   align-items: center;

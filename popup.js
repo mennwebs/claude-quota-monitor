@@ -76,9 +76,20 @@ function fmtAgo(ts) {
 }
 
 let lastTs = null;
+let fetchStatus = null;
+
+// A failed fetch right after a good reading is routine (a dropped connection); one that
+// has left the reading this old is the reason it is old, and worth saying out loud.
+const FETCH_PROBLEM_AFTER_MS = 30 * 60 * 1000;
 
 function tickLastUpdate() {
   document.getElementById('last-update').textContent = fmtAgo(lastTs);
+
+  const problem = document.getElementById('fetch-problem');
+  const failing = fetchStatus?.ok === false && !!lastTs &&
+    Date.now() - lastTs > FETCH_PROBLEM_AFTER_MS;
+  problem.classList.toggle('hidden', !failing);
+  problem.textContent = failing ? `${t('fetch_failed')} (${fetchStatus.reason})` : '';
 }
 
 setInterval(tickLastUpdate, 1000);
@@ -246,6 +257,11 @@ function render(u) {
 
 /* ── Init ── */
 applyI18n();
+chrome.storage.local.get('usageFetchStatus', (r) => {
+  fetchStatus = r.usageFetchStatus ?? null;
+  tickLastUpdate();
+});
+
 chrome.storage.local.get('claudeUsage', ({ claudeUsage }) => {
   render(claudeUsage ?? null);
 
@@ -266,6 +282,10 @@ chrome.storage.local.get('claudeUsage', ({ claudeUsage }) => {
 
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.claudeUsage) render(changes.claudeUsage.newValue ?? null);
+  if (changes.usageFetchStatus) {
+    fetchStatus = changes.usageFetchStatus.newValue ?? null;
+    tickLastUpdate();
+  }
 });
 
 /* ── Botões ── */

@@ -162,4 +162,39 @@ module.exports = async function(describe) {
     } finally { await browser.close(); }
   });
 
+  // ── Fetch failing: say why the reading is old ───────────────────────────
+  await describe('Stale reading with a failing fetch', async (assert) => {
+    const age = (ms) => ({ ...FULL_DATA.claudeUsage, ts: Date.now() - ms });
+    const shown = async (data) => {
+      const { browser, page } = await openPopup(data);
+      try {
+        return await page.$eval('#fetch-problem', el => ({
+          hidden: el.classList.contains('hidden'), text: el.textContent
+        }));
+      } finally { await browser.close(); }
+    };
+
+    const stale = await shown({
+      claudeUsage: age(24 * 3_600_000),
+      usageFetchStatus: { ok: false, reason: 'http-403', at: Date.now() }
+    });
+    assert(!stale.hidden && stale.text.includes('http-403'),
+      `old reading + failed fetch names the reason (got "${stale.text}")`);
+
+    const fresh = await shown({
+      claudeUsage: age(60_000),
+      usageFetchStatus: { ok: false, reason: 'network', at: Date.now() }
+    });
+    assert(fresh.hidden, 'a failed fetch after a fresh reading stays quiet');
+
+    const healthy = await shown({
+      claudeUsage: age(24 * 3_600_000),
+      usageFetchStatus: { ok: true, reason: null, at: Date.now() }
+    });
+    assert(healthy.hidden, 'an old reading from a fetch that succeeded says nothing');
+
+    const none = await shown({ claudeUsage: age(24 * 3_600_000) });
+    assert(none.hidden, 'no status recorded yet says nothing');
+  });
+
 };

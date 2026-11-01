@@ -9,4 +9,5 @@ run([
   require('./test-fmt'),
   require('./test-popup'),
   require('./test-bridge'),
+  require('./test-usage'),
 ]);

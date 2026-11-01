@@ -23,6 +23,9 @@
   "updated_ago": {
     "message": "updated"
   },
+  "fetch_failed": {
+    "message": "Can't refresh from claude.ai"
+  },
   "used_suffix": {
     "message": "used"
   },

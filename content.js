@@ -31,30 +31,6 @@ async function getOrgId() {
   } catch { return null; }
 }
 
-/* Extrai as categorias semanais por modelo do array `limits` (novo formato da
- * API). Cada `weekly_scoped` traz scope.model.display_name (ex: "Fable",
- * "Sonnet", "Opus"). Fallback para os campos legados seven_day_* caso a API
- * ainda não retorne `limits`. */
-function extractWeeklyScoped(data) {
-  if (Array.isArray(data.limits) && data.limits.length) {
-    return data.limits
-      .filter(l => l.kind === 'weekly_scoped' && l.scope?.model?.display_name)
-      .map(l => ({
-        name:    l.scope.model.display_name,
-        percent: l.percent ?? 0,
-        resetAt: l.resets_at ?? null
-      }));
-  }
-  // Fallback legado
-  return [
-    ['Sonnet', data.seven_day_sonnet],
-    ['Opus',   data.seven_day_opus],
-    ['Design', data.seven_day_omelette],
-  ].filter(([, v]) => v).map(([name, v]) => ({
-    name, percent: v.utilization ?? 0, resetAt: v.resets_at ?? null
-  }));
-}
-
 async function getPlan(orgId) {
   if (cachedPlan) return cachedPlan;
   try {
@@ -72,35 +48,25 @@ async function fetchAndStore() {
   const orgId = await getOrgId();
   if (!orgId) return;
 
+  const { parseUsage, recordFetch } = CQMUsage;
   try {
     const res = await fetch(`/api/organizations/${orgId}/usage`, { credentials: 'include' });
-    if (!res.ok) return;
-    const data = await res.json();
+    if (!res.ok) return recordFetch(false, `http-${res.status}`);
+    const parsed = parseUsage(await res.json().catch(() => null));
+    if (!parsed) return recordFetch(false, 'no-limits');
 
-    const session = data.five_hour;
-    if (!session) return;
+    const plan = await getPlan(orgId);
 
-    const plan  = await getPlan(orgId);
-    const extra = data.extra_usage ?? null;
-    const weeklyScoped = extractWeeklyScoped(data);
-
-    chrome.storage.local.set({
+    await chrome.storage.local.set({
       claudeUsage: {
-        percent:              session.utilization,
-        resetAt:              session.resets_at,
-        weeklyPercent:        data.seven_day?.utilization,
-        weeklyResetAt:        data.seven_day?.resets_at,
-        weeklyScoped,
-        extraUsageEnabled:    extra?.is_enabled  ?? false,
-        extraUsageUsed:       extra?.used_credits ?? 0,
-        extraUsageLimit:      extra?.monthly_limit ?? 0,
-        extraUsageCurrency:   extra?.currency ?? null,
-        plan:                 plan ?? null,
+        ...parsed,
+        plan: plan ?? null,
         orgId,
         ts: Date.now()
       }
     });
-  } catch { /* silencioso */ }
+    await recordFetch(true);
+  } catch { await recordFetch(false, 'network'); }
 }
 
 /* ── 1. Fetch inicial com retry automático ──────────────────────────────
