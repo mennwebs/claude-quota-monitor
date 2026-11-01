@@ -11,6 +11,12 @@
 
 const POLL_MS = 15 * 60 * 1000;
 
+/* Reloading the extension leaves this script running in every open claude.ai tab with
+ * its connection to the extension cut: `chrome.runtime.id` goes undefined and every
+ * chrome.* call throws "Extension context invalidated". Chrome does not inject the new
+ * version into those tabs, so the old copy can only stand down — the tab needs a reload. */
+const orphaned = () => !chrome.runtime?.id;
+
 // orgId and plan don't change while the page is open, but were re-fetched every cycle —
 // tripling the request count for two constants. Cache them; a reload re-reads both.
 let cachedOrgId = null;
@@ -45,6 +51,7 @@ async function getPlan(orgId) {
 }
 
 async function fetchAndStore() {
+  if (orphaned()) return retire();
   const orgId = await getOrgId();
   if (!orgId) return;
 
@@ -77,6 +84,7 @@ async function fetchAndStore() {
 const RETRY_DELAYS = [3000, 8000, 20000, 60000];
 
 async function fetchWithRetry(attempt = 0) {
+  if (orphaned()) return retire();
   const orgId = await getOrgId();
   if (orgId) {
     await fetchAndStore();
@@ -91,7 +99,7 @@ async function fetchWithRetry(attempt = 0) {
 }
 
 fetchWithRetry();
-setInterval(fetchAndStore, POLL_MS);
+const pollTimer = setInterval(fetchAndStore, POLL_MS);
 
 /* ── 2. Detecta fim de resposta do Claude via MutationObserver ──────────
  *
@@ -118,12 +126,19 @@ function countAssistantNodes() {
 }
 
 const observer = new MutationObserver(() => {
+  if (orphaned()) return retire();
   const current = countAssistantNodes();
   if (current > lastResponseCount) {
     lastResponseCount = current;
     scheduleRefresh();
   }
 });
+
+function retire() {
+  clearInterval(pollTimer);
+  clearTimeout(debounceTimer);
+  observer.disconnect();
+}
 
 // Aguarda o body existir (content script roda em document_idle, mas por segurança)
 const startObserver = () => {

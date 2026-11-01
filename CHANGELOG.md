@@ -34,6 +34,11 @@ All notable changes to Claude Quota Monitor are documented here.
   already polled; the keychain is not touched to decide what to suggest.
 
 ### Fixed
+- **Extension: a claude.ai tab left open across an extension reload no longer throws.**
+  The old content script outlives the reload with its connection cut, and its poll and DOM
+  observer kept calling `chrome.*` — "Extension context invalidated" on every tick. It now
+  notices `chrome.runtime.id` is gone and stands down. Reload the tab to get the new one.
+
 - **A profile whose weekly cap was spent stopped updating, silently.** With the cap at 100%
   there is no live 5-hour window and the API answers `five_hour: null`; both the service
   worker and the content script read that as "no reading" and returned without writing, so the
