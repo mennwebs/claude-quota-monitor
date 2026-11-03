@@ -143,6 +143,14 @@ module.exports = async function (describe) {
     const partial = B.buildPayload({ percent: 0 }, null, '', 'Chrome', Date.now());
     assert(partial !== null && partial.limits.five_hour.pct === 0,
       'zero percent is a real reading, not a missing one');
+
+    const ultra = B.buildPayload({ percent: null, resetAt: null, weeklyPercent: 87,
+      weeklyResetAt: 1793710799, weeklyScoped: [{ name: 'Fable', percent: 0, resetAt: 1793710800 }],
+      plan: 'default_claude_max_20x', ts: 1787648000000 }, null, '', 'Chrome', Date.now());
+    assert(ultra !== null && !('five_hour' in ultra.limits),
+      'an account with no 5-hour window sends no five_hour at all');
+    assert(ultra.limits.seven_day.pct === 87 && ultra.limits['weekly:fable'].pct === 0,
+      'and still sends everything else');
   });
 
   await describe('slugModel — model names become wire keys', async (assert) => {

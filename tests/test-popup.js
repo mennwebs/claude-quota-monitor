@@ -51,6 +51,22 @@ const CRIT_DATA = {
   }
 };
 
+// Ultra plan: no 5-hour window at all.
+const ULTRA_DATA = {
+  claudeUsage: {
+    percent:       null,
+    resetAt:       null,
+    weeklyPercent: 87,
+    weeklyResetAt: new Date(Date.now() + 5 * 3_600_000).toISOString(),
+    weeklyScoped: [
+      { name: 'Fable', percent: 0,
+        resetAt: new Date(Date.now() + 5 * 3_600_000).toISOString() },
+    ],
+    plan:          'default_claude_max_20x',
+    ts:            Date.now()
+  }
+};
+
 module.exports = async function(describe) {
 
   // ── 1. Estado vazio ──────────────────────────────────────────────────────
@@ -197,4 +213,43 @@ module.exports = async function(describe) {
     assert(none.hidden, 'no status recorded yet says nothing');
   });
 
+  // ── No 5-hour window (Ultra, some Team seats) ────────────────────────────
+  await describe('An account with no 5-hour window', async (assert) => {
+    const { browser, page } = await openPopup(ULTRA_DATA);
+    try {
+      const dataVisible = await page.$eval('#data-section',
+        el => !el.classList.contains('hidden'));
+      assert(dataVisible, 'it still counts as data, not as the empty state');
+
+      const sessionHidden = await page.$eval('#session-row',
+        el => el.classList.contains('hidden') && el.offsetHeight === 0);
+      assert(sessionHidden, 'the session block is gone, not drawn as an idle 0%');
+
+      const weeklyPct = await page.$eval('#weekly-pct-text', el => el.textContent);
+      assert(weeklyPct.includes('87%'), `the weekly figure is shown (got "${weeklyPct}")`);
+
+      const plan = await page.$eval('#plan', el => el.textContent);
+      assert(plan === 'Ultra', `Max 20x shows by its new name (got "${plan}")`);
+    } finally { await browser.close(); }
+
+    const shownFull = await openPopup(FULL_DATA);
+    try {
+      const sessionShown = await shownFull.page.$eval('#session-row',
+        el => !el.classList.contains('hidden'));
+      assert(sessionShown, 'an account with a window still shows it');
+    } finally { await shownFull.browser.close(); }
+  });
+
+  await describe('Plan badge — tier ids by the names people know', async (assert) => {
+    const badge = async (plan) => {
+      const { browser, page } = await openPopup({
+        claudeUsage: { ...NO_SCOPED_DATA.claudeUsage, plan }
+      });
+      try { return await page.$eval('#plan', el => el.textContent); }
+      finally { await browser.close(); }
+    };
+    assert(await badge('default_raven') === 'Team', 'a Team seat codename shows as Team');
+    assert(await badge('default_claude_max_5x') === 'Max (5×)', 'Max 5x keeps its name');
+    assert(await badge('default_claude_ultra') === 'Ultra', 'an ultra tier id shows as Ultra');
+  });
 };

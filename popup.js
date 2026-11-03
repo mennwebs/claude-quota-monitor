@@ -138,11 +138,12 @@ function formatPlan(raw) {
   const map = {
     // rate_limit_tier values (fonte primária da API)
     'default_claude_max_5x':  'Max (5×)',
-    'default_claude_max_20x': 'Max (20×)',
+    'default_claude_max_20x': 'Ultra',  // Max 20x was renamed Ultra; the tier id was not
     'default_claude_max':     'Max',
     'default_pro':            'Pro',
     'default_free':           'Free',
     'default_team':           'Team',
+    'default_raven':          'Team',   // a Team seat's tier id is a codename
     'default_enterprise':     'Enterprise',
     // capabilities[] values (fallback)
     'claude_max':             'Max',
@@ -151,11 +152,13 @@ function formatPlan(raw) {
     'pro':                    'Pro',
     'max':                    'Max',
     'max_5x':                 'Max (5×)',
-    'max_20x':                'Max (20×)',
+    'max_20x':                'Ultra',
     'team':                   'Team',
+    'raven':                  'Team',
     'enterprise':             'Enterprise',
   };
   const key = raw.toString().toLowerCase().replace(/[\s-]+/g, '_');
+  if (!(key in map) && key.includes('ultra')) return 'Ultra';
   return map[key] ?? raw.toString().split(/[\s_-]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
@@ -201,17 +204,24 @@ function renderScopedCategories(scoped) {
 
 /* ── Renderização ── */
 function render(u) {
-  const hasData = u?.percent !== undefined;
+  const { hasReading, hasSession } = self.CQMUsage;
+  const hasData = hasReading(u);
   document.getElementById('data-section').classList.toggle('hidden', !hasData);
   document.getElementById('empty-section').classList.toggle('hidden', hasData);
   if (!hasData) return;
 
   document.getElementById('plan').textContent = formatPlan(u.plan);
 
-  const pct = Math.min(100, Math.max(0, u.percent));
-  setBar(document.getElementById('bar'), pct);
-  document.getElementById('pct-text').textContent = `${pct}%`;
-  document.getElementById('reset-text').textContent = fmtReset(u.resetAt);
+  // No 5-hour window at all on Ultra and some Team seats: the block goes, rather than
+  // drawing an empty bar that reads as an idle session.
+  const session = hasSession(u);
+  document.getElementById('session-row').classList.toggle('hidden', !session);
+  if (session) {
+    const pct = Math.min(100, Math.max(0, u.percent));
+    setBar(document.getElementById('bar'), pct);
+    document.getElementById('pct-text').textContent = `${pct}%`;
+    document.getElementById('reset-text').textContent = fmtReset(u.resetAt);
+  }
 
   const weeklyRow = document.getElementById('weekly-row');
   if (u.weeklyPercent !== undefined) {
@@ -266,12 +276,12 @@ chrome.storage.local.get('claudeUsage', ({ claudeUsage }) => {
   render(claudeUsage ?? null);
 
   // Sem dados: tenta buscar agora e fica verificando a cada 3s
-  if (!claudeUsage?.percent) {
+  if (!self.CQMUsage.hasReading(claudeUsage)) {
     chrome.runtime.sendMessage({ type: 'FETCH_NOW' });
 
     const poll = setInterval(() => {
       chrome.storage.local.get('claudeUsage', ({ claudeUsage: u }) => {
-        if (u?.percent !== undefined) {
+        if (self.CQMUsage.hasReading(u)) {
           render(u);
           clearInterval(poll);
         }

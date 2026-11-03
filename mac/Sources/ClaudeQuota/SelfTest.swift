@@ -388,6 +388,59 @@ enum SelfTest {
         check("the status line carries no caps, so its silence retires nothing",
               viaCLI.limits["weekly:opus"] != nil)
 
+        print("\n▸ A 5-hour window the source has stopped reporting")
+        // Exactly the Ultra cards: the extension used to send `five_hour` as 0% with no
+        // reset, and the build that stops sending it must take the row away with it.
+        var ultra = AccountSnapshot(key: "acct:ultra")
+        ultra.limits = [LimitID.fiveHour: reading(0, t0.addingTimeInterval(-60)),
+                        LimitID.sevenDay: reading(5, t0.addingTimeInterval(-60))]
+        ultra.absorb(extReport([LimitID.sevenDay: reading(5, t0),
+                                "weekly:fable": reading(0, t0, label: "Fable")], at: t0))
+        check("a report without five_hour retires the source's own 5h at once",
+              ultra.limits[LimitID.fiveHour] == nil)
+        check("the rest of the report still lands",
+              ultra.limits[LimitID.sevenDay]?.pct == 5 && ultra.limits["weekly:fable"] != nil)
+        check("and the card is left with 7d alone as its ceiling",
+              ultra.structuralLimits.map(\.id) == [LimitID.sevenDay])
+
+        var otherSource = AccountSnapshot(key: "acct:other")
+        otherSource.limits = [LimitID.fiveHour: reading(12, t0.addingTimeInterval(-60), .cli)]
+        otherSource.absorb(extReport([LimitID.sevenDay: reading(5, t0)], at: t0))
+        check("it never speaks for another source's 5h",
+              otherSource.limits[LimitID.fiveHour]?.pct == 12)
+
+        var redelivered = AccountSnapshot(key: "acct:redelivered")
+        redelivered.limits = [LimitID.fiveHour: reading(30, t0)]
+        redelivered.absorb(extReport([LimitID.sevenDay: reading(8, t0.addingTimeInterval(-600))],
+                                     at: t0))
+        check("an older reading re-delivered cannot erase a newer 5h",
+              redelivered.limits[LimitID.fiveHour]?.pct == 30)
+
+        var cliUltra = AccountSnapshot(key: "acct:cli-ultra")
+        cliUltra.limits = [LimitID.fiveHour: reading(0, t0.addingTimeInterval(-60), .cli)]
+        cliUltra.absorb(IncomingReport(source: .cli,
+                                       limits: [LimitID.sevenDay: reading(40, t0, .cli)],
+                                       receivedAt: t0))
+        check("the status line retires its own 5h the same way",
+              cliUltra.limits[LimitID.fiveHour] == nil)
+
+        var stillLive = AccountSnapshot(key: "acct:still-live")
+        stillLive.limits = [LimitID.fiveHour: reading(11, t0.addingTimeInterval(-60))]
+        stillLive.absorb(extReport([LimitID.fiveHour: reading(13, t0),
+                                    LimitID.sevenDay: reading(7, t0)], at: t0))
+        check("an account that still has the window keeps it",
+              stillLive.limits[LimitID.fiveHour]?.pct == 13)
+
+        print("\n▸ Fmt.plan — the names on the badge, not the tier ids")
+        check("Max 20x is shown as Ultra", Fmt.plan("default_claude_max_20x") == "Ultra")
+        check("an ultra tier id is shown as Ultra", Fmt.plan("default_claude_ultra") == "Ultra")
+        check("Max 5x keeps its name", Fmt.plan("default_claude_max_5x") == "Max 5x")
+        check("a bare Max stays Max", Fmt.plan("default_claude_max") == "Max")
+        check("a Team seat's codename is shown as Team", Fmt.plan("default_raven") == "Team")
+        check("Pro is unchanged", Fmt.plan("default_pro") == "Pro")
+        check("an unknown tier still reads", Fmt.plan("default_claude_enterprise") == "Claude Enterprise")
+        check("no tier, no badge", Fmt.plan(nil) == nil && Fmt.plan("  ") == nil)
+
         print("\n▸ Source badges")
         var badged = AccountSnapshot(key: "acct:badges")
         badged.sourceSeen = ["Chrome": t0, "Seed": t0]

@@ -43,8 +43,9 @@ All notable changes to Claude Quota Monitor are documented here.
   there is no live 5-hour window and the API answers `five_hour: null`; both the service
   worker and the content script read that as "no reading" and returned without writing, so the
   profile sat on its last numbers (and the Mac app on that profile's last push) for as long as
-  the cap lasted. A missing window now reads as 0% with no reset time, and the parsing lives
-  in one `usage.js` that both sides load instead of two copies.
+  the cap lasted. A missing window no longer stops the reading from being written — see
+  *Changed* below for what it is stored as — and the parsing lives in one `usage.js` that both
+  sides load instead of two copies.
 - **The popup now says why a reading is old.** Every early exit in the fetchers was silent, so
   "updated 24h ago" was all there was to go on. The last fetch's outcome (`http-403`,
   `no-limits`, `network`) is kept in `usageFetchStatus`, and the popup shows it once a failing
@@ -80,6 +81,32 @@ All notable changes to Claude Quota Monitor are documented here.
   With the quota API source above turned on, that inference is not needed: `/api/oauth/profile`
   answers from the same auth context as the numbers, so it is taken as the credential's account
   outright — including in the case the file-based rule refuses to guess at.
+- **Extension: the toolbar badge ignored the weekly cap.** It picked the fullest of the 5-hour
+  session and the per-model caps, never `seven_day`, so an account with the week spent read
+  `S0`. The weekly cap now competes as `W`, and the session only when the account has one.
+- Tests: the popup suite never ran on macOS — `--disable-gpu` keeps current Chrome for Testing
+  from reaching network-idle, so every case timed out — and the test page had never included
+  `popup.css`, because the tag it looked for was written differently in `popup.html`.
+
+### Changed
+- **No 5h row for an account that has no 5-hour window.** Ultra plans and some Team seats have
+  no session limit at all, and the API answers `five_hour: null` for them on every call. The
+  extension stored that as 0% with no reset time, so every such card in the Mac panel — and the
+  popup — carried an idle-looking 5h bar for a limit that does not exist. A missing window is
+  now stored as `percent: null`, the bridge leaves `five_hour` out of the report, the popup
+  drops its session block, and the Mac app retires a source's own `five_hour` reading as soon as
+  that source posts a newer report without one. The rule follows the data rather than the plan
+  name, because the plan name cannot tell: two Team seats in the same organization differ.
+
+  An account that does have a window loses it the same way while its weekly cap is spent, so
+  its 5h row now steps aside until the week resets; the 7d row at 100% already says why.
+
+  A browser profile still running an older build keeps sending the 0% until the extension is
+  reloaded there.
+- **Plan badges use the names people know.** The tier ids lag the product: Max 20x was renamed
+  Ultra while the API kept answering `default_claude_max_20x`, and a Team seat answers with the
+  codename `default_raven`. Both the Mac panel and the popup now show them as *Ultra* and
+  *Team*; Max 5x is unchanged.
 
 ---
 

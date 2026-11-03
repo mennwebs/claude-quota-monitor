@@ -270,7 +270,8 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
             .sorted { ($0.rank, $0.short) < ($1.rank, $1.short) }
     }
 
-    /// The two ceilings every account has, whatever models it uses.
+    /// The account-wide ceilings, whatever models it uses: 7d always, 5h only for an
+    /// account that has a 5-hour window — Ultra plans and some Team seats do not.
     var structuralLimits: [Limit] { orderedLimits.filter { $0.rank < 2 } }
 
     /// Per-model weekly caps, fullest first. They share one reset and there can be any
@@ -389,6 +390,7 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
             limits[rawKind] = reading
         }
         retireModelCaps(missingFrom: r)
+        retireSessionWindow(missingFrom: r)
 
         if let e = r.extra, extra.map({ $0.observedAt <= e.observedAt }) ?? true {
             extra = e
@@ -421,6 +423,25 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
             else { return true }
             return reading.observedAt > cutoff
         }
+    }
+
+    /// A report with no `five_hour` says the account has no 5-hour window. Ultra plans and
+    /// some Team seats have none at all, and an account that does have one loses it while
+    /// its weekly cap is spent. Left alone, the last reading would hold the row forever —
+    /// and the extension used to send exactly that as 0% with no reset, so every Ultra card
+    /// carried an idle-looking 5h bar for a limit that does not exist.
+    ///
+    /// Unlike the model list there is no hiccup to wait out: every source states the two
+    /// ceilings on every report, so the reading goes at once rather than after
+    /// `retiredModelCapAge`. Only the source's *own* reading, for the same reason as the
+    /// model caps; and only one the report has seen past, since two browser profiles on one
+    /// account post on their own minutes and an older re-delivery must not erase a newer one.
+    private mutating func retireSessionWindow(missingFrom r: IncomingReport) {
+        guard r.limits[LimitID.fiveHour] == nil,
+              let held = limits[LimitID.fiveHour], held.source == r.source,
+              let seen = r.limits.values.map(\.observedAt).max(), seen > held.observedAt
+        else { return }
+        limits[LimitID.fiveHour] = nil
     }
 }
 

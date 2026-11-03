@@ -90,7 +90,7 @@ async function fetchWithRetry(attempt = 0) {
     await fetchAndStore();
     // Verifica se os dados foram salvos com sucesso
     const { claudeUsage } = await chrome.storage.local.get('claudeUsage');
-    if (claudeUsage?.percent !== undefined) return; // sucesso
+    if (CQMUsage.hasReading(claudeUsage)) return; // sucesso
   }
   // Falhou — agenda próxima tentativa se ainda houver
   if (attempt < RETRY_DELAYS.length) {

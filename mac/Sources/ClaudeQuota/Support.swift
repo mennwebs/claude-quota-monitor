@@ -223,18 +223,23 @@ enum Fmt {
 
     /// `default_claude_max_5x` → `Max 5x`. Unknown tiers pass through readably
     /// rather than being hidden, so a new plan name still shows something true.
+    ///
+    /// The tier ids lag the product names: Max 20x was renamed Ultra while the API kept
+    /// answering `default_claude_max_20x`, and a Team seat answers with the codename
+    /// `default_raven`. Both are shown by the name a person would recognise.
     static func plan(_ raw: String?) -> String? {
         guard var s = raw?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
-        s = s.replacingOccurrences(of: "default_", with: "")
+        s = s.lowercased().replacingOccurrences(of: "default_", with: "")
         switch s {
         case "free":  return "Free"
         case "pro":   return "Pro"
-        case "team", "claude_team": return "Team"
+        case "team", "claude_team", "raven": return "Team"
         default: break
         }
+        if s.contains("ultra") { return "Ultra" }
         if s.hasPrefix("claude_max") || s.hasPrefix("max") {
-            let mult = s.contains("20x") ? "20x" : s.contains("5x") ? "5x" : nil
-            return mult.map { "Max \($0)" } ?? "Max"
+            if s.contains("20x") { return "Ultra" }
+            return s.contains("5x") ? "Max 5x" : "Max"
         }
         return s.replacingOccurrences(of: "_", with: " ").capitalized
     }
