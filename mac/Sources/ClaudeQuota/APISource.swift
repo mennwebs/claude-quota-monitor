@@ -107,7 +107,7 @@ enum QuotaAPI {
     /// (`default_claude_max_5x` here against `default_raven` there, on one Team seat), so
     /// carrying it would badge a Team card as Max — and show the model-cap row a Team card
     /// hides — on any row the extension is not reporting. Where it is, the extension's
-    /// "Team" outranks it anyway (`AccountSnapshot.absorbPlan`), so it would add nothing.
+    /// "Team" outranks it anyway (`AccountSnapshot.planYields`), so it would add nothing.
     /// The tier this endpoint reports is shown in Settings instead, next to the account
     /// it identifies.
     static func identity(fromProfile data: Data) -> CLIIdentity? {

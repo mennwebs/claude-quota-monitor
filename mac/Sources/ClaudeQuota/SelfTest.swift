@@ -494,6 +494,7 @@ enum SelfTest {
         }
 
         print("\n▸ A Team seat's model caps — hidden unless asked for")
+        let t1 = t0.addingTimeInterval(60)
         // The 7Sol card: a Team seat whose Fable cap sits at 0% beside a 52% week.
         var teamSeat = AccountSnapshot(key: "acct:team")
         teamSeat.absorb(IncomingReport(source: .ext, plan: "default_raven",
@@ -564,6 +565,43 @@ enum SelfTest {
                                        receivedAt: lapsed))
         check("each extension report renews the hold", restated.plan == "default_raven")
 
+        // The extension re-posts its cache every minute even while its fetch is failing.
+        // Those re-posts must neither renew the hold nor, once it has lapsed, flip the card
+        // back each minute against the status line.
+        var frozen = teamSeat
+        for minute in stride(from: 60.0, through: AccountSnapshot.sourceBadgeAge + 600, by: 60) {
+            frozen.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                         limits: [LimitID.sevenDay: reading(52, t0)],
+                                         receivedAt: t0.addingTimeInterval(minute)))
+        }
+        let afterFreeze = t0.addingTimeInterval(AccountSnapshot.sourceBadgeAge + 660)
+        frozen.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                     limits: [LimitID.sevenDay: reading(52, afterFreeze, .cli)],
+                                     receivedAt: afterFreeze))
+        check("a re-posted cache does not renew the hold", frozen.plan == "default_claude_max_5x")
+        frozen.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                     limits: [LimitID.sevenDay: reading(52, t0)],
+                                     receivedAt: afterFreeze.addingTimeInterval(60)))
+        check("nor take the plan back from a newer statement", frozen.plan == "default_claude_max_5x")
+
+        // First launch of a build, or a new row: the status line speaks first, freshly
+        // stamped, and the extension's next re-post carries a reading minutes older.
+        var cliFirst = AccountSnapshot(key: "acct:cli-first")
+        cliFirst.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                       limits: [LimitID.sevenDay: reading(52, t1, .cli)],
+                                       receivedAt: t1))
+        cliFirst.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                       limits: [LimitID.sevenDay: reading(52, t0)],
+                                       receivedAt: t1.addingTimeInterval(5)))
+        check("an extension Team minutes older than the status line still takes the card",
+              cliFirst.plan == "default_raven")
+
+        // And a seat that left Team says so through the extension too: same source, newest wins.
+        var leaver = teamSeat
+        leaver.absorb(IncomingReport(source: .ext, plan: "default_claude_max_5x",
+                                     limits: [LimitID.sevenDay: reading(5, t1)], receivedAt: t1))
+        check("the extension can take its own Team back", leaver.plan == "default_claude_max_5x")
+
         var cliOnly = AccountSnapshot(key: "acct:cli-only")
         cliOnly.absorb(IncomingReport(source: .cli, plan: "default_pro",
                                       limits: [LimitID.sevenDay: reading(5, t0, .cli)],
@@ -593,7 +631,7 @@ enum SelfTest {
         // Store folds duplicates through `foldPlan`.
         var cliRow = AccountSnapshot(key: "email:x")
         cliRow.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
-                                     limits: [LimitID.sevenDay: reading(1, t0, .cli)], receivedAt: t0))
+                                     limits: [LimitID.sevenDay: reading(1, t1, .cli)], receivedAt: t1))
         var keptCLI = cliRow
         keptCLI.foldPlan(from: teamSeat)
         check("folding in the extension's row takes its plan",
@@ -604,8 +642,34 @@ enum SelfTest {
               keptExt.plan == "default_raven" && keptExt.planSource == .ext)
         var olderExt = teamSeat
         olderExt.foldPlan(from: restated)
-        check("between two extension plans the fold keeps the more recent",
-              olderExt.planStatedAt == later)
+        var newerExt = restated
+        newerExt.foldPlan(from: teamSeat)
+        check("between two extension plans the fold keeps the more recent, either way",
+              olderExt.planStatedAt == later && newerExt.planStatedAt == later)
+
+        // The `upgraded` reports, split across two rows: folding must reach what absorbing
+        // them in turn did.
+        var extMax = AccountSnapshot(key: "acct:ext-max")
+        extMax.absorb(IncomingReport(source: .ext, plan: "default_claude_max_5x",
+                                     limits: [LimitID.sevenDay: reading(5, t0)], receivedAt: t0))
+        var cliMax = AccountSnapshot(key: "email:cli-max")
+        cliMax.absorb(IncomingReport(source: .cli, plan: "default_claude_max_20x",
+                                     limits: [LimitID.sevenDay: reading(5, t1, .cli)], receivedAt: t1))
+        var foldA = extMax, foldB = cliMax
+        foldA.foldPlan(from: cliMax)
+        foldB.foldPlan(from: extMax)
+        check("a fold takes the newer non-Team plan, whichever row survives",
+              foldA.plan == "default_claude_max_20x" && foldB.plan == "default_claude_max_20x")
+
+        var staleTeam = teamSeat
+        var freshCLI = AccountSnapshot(key: "email:fresh")
+        freshCLI.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                       limits: [LimitID.sevenDay: reading(5, lapsed, .cli)],
+                                       receivedAt: lapsed))
+        staleTeam.foldPlan(from: freshCLI)
+        freshCLI.foldPlan(from: teamSeat)
+        check("and a lapsed Team plan does not win a fold",
+              staleTeam.plan == "default_claude_max_5x" && freshCLI.plan == "default_claude_max_5x")
 
         var blank = AccountSnapshot(key: "org:blank")
         blank.foldPlan(from: cliRow)

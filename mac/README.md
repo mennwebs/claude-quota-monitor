@@ -109,8 +109,8 @@ the plan the extension reports — claude.ai's organization names it `default_ra
 can tell: `~/.claude.json` and the quota API both word the same seat as a Max tier, so a Team seat
 seen only through Claude Code keeps its caps. While the extension keeps saying Team, the status
 line's tier cannot overwrite it — left to last-writer-wins it would put the row back within
-seconds of every extension report. The hold lapses after three hours without the extension
-restating it, the same horizon a source badge uses.
+seconds of every extension report. The hold lapses once the extension's newest reading is three
+hours old, the horizon a source badge uses; a re-posted cache does not renew it.
 
 Hooks were the obvious alternative to the status line shim. They do not carry rate limits —
 `statusLine` is the only local carrier.

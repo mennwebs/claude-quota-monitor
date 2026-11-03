@@ -106,9 +106,12 @@ All notable changes to Claude Quota Monitor are documented here.
   Claude Code's profile answered, which on that same seat is a Max tier. Merging was
   last-writer-wins and the status line reports on every render, so a Team seat signed into Claude
   Code could have its badge — and now its model-cap row — turned back within seconds of each
-  extension report. The hold covers only that case, and lapses once the extension has not stated
-  the plan for three hours, so a profile that stopped reporting cannot pin a plan the account has
-  since left. Every other plan is still last-writer-wins.
+  extension report. The hold covers only that case, holds whichever of the two arrives first, and
+  lapses once the extension's newest reading is three hours old — the horizon its source badge
+  already has — after which the status line's tier may take over. A re-posted cache does not
+  renew it. Otherwise the most recently observed plan wins, as limits do; arrival order no longer
+  decides it. With the quota API source on, nothing else carries a tier, so a row keeps the last
+  plan the extension stated.
 - **No 5h row for an account that has no 5-hour window.** Ultra plans and some Team seats have
   no session limit at all, and the API answers `five_hour: null` for them on every call. The
   extension stored that as 0% with no reset time, so every such card in the Mac panel — and the
