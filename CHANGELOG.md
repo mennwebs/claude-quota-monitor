@@ -95,7 +95,8 @@ All notable changes to Claude Quota Monitor are documented here.
   popup — carried an idle-looking 5h bar for a limit that does not exist. A missing window is
   now stored as `percent: null`, the bridge leaves `five_hour` out of the report, the popup
   drops its session block, and the Mac app retires a source's own `five_hour` reading as soon as
-  that source posts a newer report without one. The rule follows the data rather than the plan
+  that source posts a newer report without one — and remembers it, so another profile on the
+  same account re-posting an older 5h cannot revive the row. The rule follows the data rather than the plan
   name, because the plan name cannot tell: two Team seats in the same organization differ.
 
   An account that does have a window loses it the same way while its weekly cap is spent, so

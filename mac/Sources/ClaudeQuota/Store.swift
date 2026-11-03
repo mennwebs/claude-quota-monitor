@@ -215,6 +215,7 @@ final class Store: ObservableObject {
         for (k, r) in victim.limits where (target.limits[k]?.observedAt ?? .distantPast) < r.observedAt {
             target.limits[k] = r
         }
+        target.inheritSessionRetirements(from: victim)
         if let e = victim.extra, (target.extra?.observedAt ?? .distantPast) < e.observedAt {
             target.extra = e
         }

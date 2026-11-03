@@ -257,6 +257,13 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
     /// the report landed, because that is what the badge claims — that this source is
     /// feeding the row. Optional for the same decoding reason as `lastContactAt`.
     var sourceSeen: [String: Date]?
+    /// When each source last reported this account with no 5-hour window, keyed by
+    /// `ReadingSource.rawValue`. Retiring the 5h reading leaves nothing behind for the
+    /// newest-wins merge to compare against, so without this an *older* 5h reading arriving
+    /// afterwards — a second browser profile re-posting its cache, a row folded in — would
+    /// simply be written back, and the row would come and go every minute. Optional for
+    /// the same decoding reason as `lastContactAt`.
+    var sessionRetiredAt: [String: Date]?
 
     var id: String { key }
 
@@ -387,6 +394,7 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
 
         for (rawKind, reading) in r.limits {
             if let existing = limits[rawKind], existing.observedAt > reading.observedAt { continue }
+            if rawKind == LimitID.fiveHour, predatesRetirement(reading) { continue }
             limits[rawKind] = reading
         }
         retireModelCaps(missingFrom: r)
@@ -436,12 +444,44 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
     /// `retiredModelCapAge`. Only the source's *own* reading, for the same reason as the
     /// model caps; and only one the report has seen past, since two browser profiles on one
     /// account post on their own minutes and an older re-delivery must not erase a newer one.
+    ///
+    /// The absence is remembered in `sessionRetiredAt`, so it holds against older data the
+    /// way a newer reading would: the other profile's stale re-post is refused, not revived.
     private mutating func retireSessionWindow(missingFrom r: IncomingReport) {
         guard r.limits[LimitID.fiveHour] == nil,
-              let held = limits[LimitID.fiveHour], held.source == r.source,
-              let seen = r.limits.values.map(\.observedAt).max(), seen > held.observedAt
+              let seen = r.limits.values.map(\.observedAt).max()
         else { return }
-        limits[LimitID.fiveHour] = nil
+        var retired = sessionRetiredAt ?? [:]
+        let source = r.source.rawValue
+        retired[source] = max(retired[source] ?? .distantPast, seen)
+        sessionRetiredAt = retired
+        dropSessionPredatingRetirement()
+    }
+
+    /// Whether a 5h reading was observed before its own source last said there is no
+    /// window. A later reading is the window coming back — a spent week resetting — and
+    /// is taken as usual.
+    private func predatesRetirement(_ reading: LimitReading) -> Bool {
+        guard let at = sessionRetiredAt?[reading.source.rawValue] else { return false }
+        return reading.observedAt < at
+    }
+
+    private mutating func dropSessionPredatingRetirement() {
+        if let held = limits[LimitID.fiveHour], predatesRetirement(held) {
+            limits[LimitID.fiveHour] = nil
+        }
+    }
+
+    /// Folding a duplicate row into this one, after its limits have been merged: the later
+    /// "no window" per source wins, and a 5h reading either row held from before it goes —
+    /// including one the merge just copied in over this row's own retirement.
+    mutating func inheritSessionRetirements(from other: AccountSnapshot) {
+        if let theirs = other.sessionRetiredAt {
+            var mine = sessionRetiredAt ?? [:]
+            for (source, at) in theirs { mine[source] = max(mine[source] ?? .distantPast, at) }
+            sessionRetiredAt = mine
+        }
+        dropSessionPredatingRetirement()
     }
 }
 
