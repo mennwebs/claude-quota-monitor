@@ -522,7 +522,7 @@ enum SelfTest {
               spentCap.binding(at: t0, modelCaps: true)?.id == "weekly:fable" &&
               spentCap.binding(at: t0)?.id == "weekly:fable")
 
-        print("\n▸ The plan — the extension's word outranks the status line's")
+        print("\n▸ The plan — the extension's \"Team\" holds against the status line's tier")
         // claude.ai names a Team seat `default_raven`; Claude Code's profile words the same
         // seat as a Max tier, and the status line reports on every render. Last-writer-wins
         // would put the Fable row back on the card within seconds of every extension report.
@@ -534,6 +534,35 @@ enum SelfTest {
               flipped.plan == "default_raven" && flipped.isTeam)
         check("and its readings still land",
               flipped.limits[LimitID.sevenDay]?.source == .cli)
+
+        // The hold is only for the disagreement it exists for. Elsewhere the sources read
+        // the same tier, and the extension's is cached until claude.ai is next opened.
+        var upgraded = AccountSnapshot(key: "acct:upgraded")
+        upgraded.absorb(IncomingReport(source: .ext, plan: "default_claude_max_5x",
+                                       limits: [LimitID.sevenDay: reading(5, t0)], receivedAt: t0))
+        upgraded.absorb(IncomingReport(source: .cli, plan: "default_claude_max_20x",
+                                       limits: [LimitID.sevenDay: reading(5, t0.addingTimeInterval(60), .cli)],
+                                       receivedAt: t0.addingTimeInterval(60)))
+        check("a non-Team plan from the extension does not hold off the status line",
+              upgraded.plan == "default_claude_max_20x")
+
+        // And it lapses with the extension: a profile gone quiet must not pin the card.
+        let lapsed = t0.addingTimeInterval(AccountSnapshot.sourceBadgeAge + 60)
+        var leftTeam = teamSeat
+        leftTeam.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                       limits: [LimitID.sevenDay: reading(5, lapsed, .cli)],
+                                       receivedAt: lapsed))
+        check("an extension silent past the badge's age no longer holds the plan",
+              leftTeam.plan == "default_claude_max_5x" && !leftTeam.isTeam)
+
+        var restated = teamSeat
+        let later = t0.addingTimeInterval(AccountSnapshot.sourceBadgeAge - 600)
+        restated.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                       limits: [LimitID.sevenDay: reading(52, later)], receivedAt: later))
+        restated.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                       limits: [LimitID.sevenDay: reading(52, lapsed, .cli)],
+                                       receivedAt: lapsed))
+        check("each extension report renews the hold", restated.plan == "default_raven")
 
         var cliOnly = AccountSnapshot(key: "acct:cli-only")
         cliOnly.absorb(IncomingReport(source: .cli, plan: "default_pro",
@@ -573,6 +602,11 @@ enum SelfTest {
         keptExt.foldPlan(from: cliRow)
         check("and folding the status line's row into it keeps the extension's",
               keptExt.plan == "default_raven" && keptExt.planSource == .ext)
+        var olderExt = teamSeat
+        olderExt.foldPlan(from: restated)
+        check("between two extension plans the fold keeps the more recent",
+              olderExt.planStatedAt == later)
+
         var blank = AccountSnapshot(key: "org:blank")
         blank.foldPlan(from: cliRow)
         check("a row with no plan takes whatever the other knew",
@@ -872,8 +906,8 @@ enum SelfTest {
             check("the account is named", id.accountUuid == "acc-1")
             check("the email is lowercased, as every other path stores it", id.email == "me@example.com")
             check("the organization rides along", id.orgId == "org-1" && id.orgName == "SeedWebs")
-            // This endpoint and claude.ai word the tier differently for one org, and
-            // `absorb` is last-writer-wins — so sending both would make the badge alternate.
+            // This endpoint words a Team seat as a Max tier, so carrying it would badge a
+            // Team card as Max wherever the extension is not reporting it.
             check("the plan is deliberately not carried", id.plan == nil)
         } else { failed += 1; print("  ✗  a well-formed profile did not parse") }
 

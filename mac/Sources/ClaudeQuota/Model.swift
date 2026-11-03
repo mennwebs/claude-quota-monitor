@@ -244,12 +244,13 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
     var orgId: String?
     var orgName: String?
     var plan: String?
-    /// Which source last set `plan`. The sources word one seat's tier differently — on a
-    /// Team seat claude.ai's organization answers `default_raven` while Claude Code's
-    /// profile answers a Max tier — and the panel decides what a card shows from it, so
-    /// last-writer-wins would make the card change shape every minute. Optional for the
-    /// same decoding reason as `lastContactAt`; see `absorbPlan`.
+    /// Which source last set `plan`, and when it last said so. The sources word one seat's
+    /// tier differently — on a Team seat claude.ai's organization answers `default_raven`
+    /// while Claude Code's profile answers a Max tier — and the panel decides what a card
+    /// shows from it, so last-writer-wins would make the card change shape every minute.
+    /// Optional for the same decoding reason as `lastContactAt`; see `absorbPlan`.
     var planSource: ReadingSource?
+    var planStatedAt: Date?
     var browsers: [String] = []           // which browsers have reported this account
     var sawCLI: Bool = false
     var limits: [String: LimitReading] = [:]
@@ -374,26 +375,39 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
-    /// The extension's word on the plan outranks the status line's. It reads claude.ai's
-    /// organization, which is what names a Team seat; `~/.claude.json` carries the tier
-    /// Claude Code's profile answered, which on that same seat is a Max tier. The status
-    /// line reports on every render, so letting it write would turn the card back within
-    /// seconds of every extension report. A source may still revise its own word, so a
-    /// plan change seen only by the CLI is not frozen at the old tier.
-    private mutating func absorbPlan(_ incoming: String?, from source: ReadingSource) {
+    /// While the extension is still saying "Team", nothing else may say otherwise.
+    ///
+    /// The extension reads claude.ai's organization, which is the only source that names a
+    /// Team seat at all; `~/.claude.json` carries the tier Claude Code's profile answered,
+    /// which on that same seat is a Max tier. The status line reports on every render, so
+    /// letting it write would turn the card back — badge and model-cap row both — within
+    /// seconds of every extension report.
+    ///
+    /// Narrow on purpose. Everywhere else the sources read the same `rate_limit_tier` and
+    /// last-writer-wins costs nothing, and the extension caches its tier until claude.ai is
+    /// next opened in that profile, so it is not the fresher word in general. And the hold
+    /// lapses with the extension: a profile that stopped reporting hours ago must not pin
+    /// the card to a plan the account may since have left. The horizon is the badge's, the
+    /// app's existing answer to "is this source still feeding the row".
+    private mutating func absorbPlan(_ incoming: String?, from source: ReadingSource, at when: Date) {
         guard let incoming else { return }
-        if source != .ext, planSource == .ext { return }
+        if source != .ext, planSource == .ext, isTeam, let said = planStatedAt,
+           when.timeIntervalSince(said) < Self.sourceBadgeAge { return }
         plan = incoming
         planSource = source
+        planStatedAt = when
     }
 
-    /// Folding a duplicate row's plan in. The extension's word wins, as in `absorb`;
-    /// short of that, whatever this row already knew.
+    /// Folding a duplicate row's plan in. The extension's word wins, as in `absorb`; between
+    /// two of the same rank, the more recent one.
     mutating func foldPlan(from victim: AccountSnapshot) {
         guard let theirs = victim.plan else { return }
-        if plan == nil || (victim.planSource == .ext && planSource != .ext) {
+        let theirsIsExt = victim.planSource == .ext, mineIsExt = planSource == .ext
+        let newer = (victim.planStatedAt ?? .distantPast) > (planStatedAt ?? .distantPast)
+        if plan == nil || (theirsIsExt && !mineIsExt) || (theirsIsExt == mineIsExt && newer) {
             plan = theirs
             planSource = victim.planSource
+            planStatedAt = victim.planStatedAt
         }
     }
 
@@ -412,7 +426,7 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         email       = r.email       ?? email
         orgId       = r.orgId       ?? orgId
         orgName     = r.orgName     ?? orgName
-        absorbPlan(r.plan, from: r.source)
+        absorbPlan(r.plan, from: r.source, at: r.receivedAt)
 
         // What the badge claims is that this source is producing readings, so it is
         // stamped with the newest observation in the report rather than with the moment

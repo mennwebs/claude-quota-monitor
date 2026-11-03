@@ -98,11 +98,17 @@ All notable changes to Claude Quota Monitor are documented here.
 
   Unlike the 5h rule below, this one goes by the plan rather than by the data: a 0% cap reads the
   same whether the model is unused or simply not used *yet*, so only the user can say it is noise.
-- **The extension's plan now outranks the status line's.** claude.ai's organization names a Team
-  seat `default_raven`; `~/.claude.json` carries the tier Claude Code's profile answered, which on
-  that same seat is a Max tier. Merging was last-writer-wins, and the status line reports on every
-  render, so a Team seat signed into Claude Code could have its badge — and now its model-cap row —
-  turned back within seconds of each extension report. Each source may still revise its own word.
+  A card is recognised as Team from the plan the extension reports; the quota API source and
+  `~/.claude.json` both word a Team seat as a Max tier, so a Team seat seen only through Claude
+  Code keeps its model caps on the card.
+- **While the extension says a seat is Team, the status line can no longer say otherwise.**
+  claude.ai's organization names a Team seat `default_raven`; `~/.claude.json` carries the tier
+  Claude Code's profile answered, which on that same seat is a Max tier. Merging was
+  last-writer-wins and the status line reports on every render, so a Team seat signed into Claude
+  Code could have its badge — and now its model-cap row — turned back within seconds of each
+  extension report. The hold covers only that case, and lapses once the extension has not stated
+  the plan for three hours, so a profile that stopped reporting cannot pin a plan the account has
+  since left. Every other plan is still last-writer-wins.
 - **No 5h row for an account that has no 5-hour window.** Ultra plans and some Team seats have
   no session limit at all, and the API answers `five_hour: null` for them on every call. The
   extension stored that as 0% with no reset time, so every such card in the Mac panel — and the

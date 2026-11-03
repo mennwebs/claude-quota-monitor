@@ -105,9 +105,12 @@ its own and the next model will too — neither half of this names a model anywh
 A Team card hides its model ceilings by default, and the menu bar glyph leaves them out with it:
 Team organizations tend not to use those models, so the row only ever said `0%`. **ตั้งค่า… →
 ทั่วไป → แสดงเพดานรายโมเดลของบัญชี Team** shows them again. Which card is a Team seat is read from
-the plan the extension reports — claude.ai's organization names it `default_raven` — and that
-word outranks the tier in `~/.claude.json`, which words the same seat as a Max tier. Left to
-last-writer-wins, the status line would put the row back within seconds of every extension report.
+the plan the extension reports — claude.ai's organization names it `default_raven`. Nothing else
+can tell: `~/.claude.json` and the quota API both word the same seat as a Max tier, so a Team seat
+seen only through Claude Code keeps its caps. While the extension keeps saying Team, the status
+line's tier cannot overwrite it — left to last-writer-wins it would put the row back within
+seconds of every extension report. The hold lapses after three hours without the extension
+restating it, the same horizon a source badge uses.
 
 Hooks were the obvious alternative to the status line shim. They do not carry rate limits —
 `statusLine` is the only local carrier.
