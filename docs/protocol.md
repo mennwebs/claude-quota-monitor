@@ -140,7 +140,7 @@ the extension is not reporting it. The tier this endpoint reports is shown in Se
 beside the account it identifies. Once this source has answered, the status line's reports carry no
 tier either (their identity comes from the profile, below); until then they carry the tier from
 `~/.claude.json`, which cannot overwrite an extension's "Team" while the extension's reading is
-fresh (`AccountSnapshot.planYields`).
+fresh (`AccountSnapshot.resolvePlan`).
 
 While this source is on, the status line's identity comes from it too. The file-based rule above
 has to infer whose credential Claude Code is using; the profile answers it, from the same auth

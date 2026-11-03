@@ -614,7 +614,7 @@ enum SelfTest {
                                       limits: [LimitID.sevenDay: reading(6, t0.addingTimeInterval(120))],
                                       receivedAt: t0.addingTimeInterval(120)))
         check("and the extension's overrides the status line's",
-              cliOnly.plan == "default_raven" && cliOnly.planSource == .ext)
+              cliOnly.plan == "default_raven")
         cliOnly.absorb(IncomingReport(source: .ext,
                                       limits: [LimitID.sevenDay: reading(6, t0.addingTimeInterval(180))],
                                       receivedAt: t0.addingTimeInterval(180)))
@@ -626,7 +626,7 @@ enum SelfTest {
         legacyPlan.absorb(IncomingReport(source: .ext, plan: "default_raven",
                                          limits: [LimitID.sevenDay: reading(1, t0)], receivedAt: t0))
         check("an older row picks up the source on its next extension report",
-              legacyPlan.planSource == .ext)
+              legacyPlan.planStatements?[ReadingSource.ext.rawValue] != nil && legacyPlan.plan == "default_raven")
 
         // Store folds duplicates through `foldPlan`.
         var cliRow = AccountSnapshot(key: "email:x")
@@ -635,17 +635,17 @@ enum SelfTest {
         var keptCLI = cliRow
         keptCLI.foldPlan(from: teamSeat)
         check("folding in the extension's row takes its plan",
-              keptCLI.plan == "default_raven" && keptCLI.planSource == .ext)
+              keptCLI.plan == "default_raven" && keptCLI.planStatements?[ReadingSource.ext.rawValue] != nil)
         var keptExt = teamSeat
         keptExt.foldPlan(from: cliRow)
         check("and folding the status line's row into it keeps the extension's",
-              keptExt.plan == "default_raven" && keptExt.planSource == .ext)
+              keptExt.plan == "default_raven")
         var olderExt = teamSeat
         olderExt.foldPlan(from: restated)
         var newerExt = restated
         newerExt.foldPlan(from: teamSeat)
         check("between two extension plans the fold keeps the more recent, either way",
-              olderExt.planStatedAt == later && newerExt.planStatedAt == later)
+              olderExt.planStatements?[ReadingSource.ext.rawValue]?.at == later && newerExt.planStatements?[ReadingSource.ext.rawValue]?.at == later)
 
         // The `upgraded` reports, split across two rows: folding must reach what absorbing
         // them in turn did.
@@ -671,16 +671,73 @@ enum SelfTest {
         check("and a lapsed Team plan does not win a fold",
               staleTeam.plan == "default_claude_max_5x" && freshCLI.plan == "default_claude_max_5x")
 
+        var legacyVictim = AccountSnapshot(key: "email:legacy")
+        legacyVictim.plan = "default_pro"
+        var noPlan = AccountSnapshot(key: "acct:no-plan")
+        noPlan.foldPlan(from: legacyVictim)
+        check("a row from before statements were kept still lends its plan", noPlan.plan == "default_pro")
+
         var blank = AccountSnapshot(key: "org:blank")
         blank.foldPlan(from: cliRow)
         check("a row with no plan takes whatever the other knew",
-              blank.plan == "default_claude_max_5x" && blank.planSource == .cli)
+              blank.plan == "default_claude_max_5x")
+
+        // Two profiles on one account: A still caches the Max tier it read before the seat
+        // moved, B reads Team. A status line report between them must not let B's older
+        // re-post take back a card A has already contradicted.
+        var twoTiers = AccountSnapshot(key: "acct:two-tiers")
+        let e1 = t0, e2 = t0.addingTimeInterval(600), c = t0.addingTimeInterval(900)
+        func ext(_ plan: String, _ at: Date, receivedAt: Date) -> IncomingReport {
+            IncomingReport(source: .ext, plan: plan, limits: [LimitID.sevenDay: reading(5, at)],
+                           receivedAt: receivedAt)
+        }
+        twoTiers.absorb(ext("default_raven", e1, receivedAt: e1))
+        twoTiers.absorb(ext("default_claude_max_5x", e2, receivedAt: e2))
+        twoTiers.absorb(IncomingReport(source: .cli, plan: "default_claude_max_20x",
+                                       limits: [LimitID.sevenDay: reading(5, c, .cli)], receivedAt: c))
+        twoTiers.absorb(ext("default_raven", e1, receivedAt: c.addingTimeInterval(30)))
+        check("an extension Team since contradicted cannot win the card back",
+              twoTiers.plan == "default_claude_max_20x")
+
+        // Folding must land where absorbing the same reports in turn would. Deterministic
+        // pseudo-random streams, split across two rows, folded both ways round.
+        var lcg: UInt64 = 0x5eed
+        func next(_ n: Int) -> Int {
+            lcg = lcg &* 6364136223846793005 &+ 1442695040888963407
+            return Int((lcg >> 33) % UInt64(n))
+        }
+        let kinds: [(ReadingSource, String)] = [(.ext, "default_raven"), (.ext, "default_claude_max_5x"),
+                                                (.cli, "default_claude_max_5x"), (.cli, "default_claude_max_20x")]
+        var mismatches = 0
+        for _ in 0..<3000 {
+            var used = Set<Int>()
+            var stream: [(Int, IncomingReport)] = []
+            for _ in 0..<(2 + next(5)) {
+                var minute = next(480)
+                while used.contains(minute) { minute = next(480) }
+                used.insert(minute)
+                let (src, plan) = kinds[next(kinds.count)]
+                let at = t0.addingTimeInterval(Double(minute) * 60)
+                stream.append((next(2), IncomingReport(source: src, plan: plan,
+                                                       limits: [LimitID.sevenDay: reading(5, at, src)],
+                                                       receivedAt: at)))
+            }
+            stream.sort { $0.1.receivedAt < $1.1.receivedAt }
+            var whole = AccountSnapshot(key: "acct:whole")
+            var rows = [AccountSnapshot(key: "acct:a"), AccountSnapshot(key: "email:b")]
+            for (side, r) in stream { whole.absorb(r); rows[side].absorb(r) }
+            var ab = rows[0], ba = rows[1]
+            ab.foldPlan(from: rows[1])
+            ba.foldPlan(from: rows[0])
+            if ab.plan != whole.plan || ba.plan != whole.plan { mismatches += 1 }
+        }
+        check("a fold reaches what absorbing in turn does, over 3000 streams", mismatches == 0)
 
         if let data = try? JSONIO.encoder.encode(teamSeat),
            let back = try? JSONIO.decoder.decode(AccountSnapshot.self, from: data) {
-            check("the plan's source survives a save", back.planSource == .ext)
+            check("the plan statements survive a save", back.planStatements == teamSeat.planStatements && back.planStatements != nil)
         } else {
-            check("the plan's source survives a save", false)
+            check("the plan statements survive a save", false)
         }
 
         print("\n▸ Fmt.plan — the names on the badge, not the tier ids")
@@ -914,7 +971,7 @@ enum SelfTest {
         """
         if let a = try? JSONIO.decoder.decode(AccountSnapshot.self, from: Data(earlierAccount.utf8)) {
             check("a state file with no contact field decodes", a.lastContactAt == nil)
-            check("nor a plan source", a.planSource == nil)
+            check("nor plan statements", a.planStatements == nil)
             check("and its readings come back", a.limits[LimitID.fiveHour]?.pct == 5)
         } else { failed += 1; print("  ✗  a state file from an earlier build no longer decodes") }
 
