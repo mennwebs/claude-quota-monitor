@@ -458,27 +458,36 @@ enum SelfTest {
         check("a newer 5h is the window coming back, and is taken",
               twoProfiles.limits[LimitID.fiveHour]?.pct == 2)
 
-        // Store's fold copies a victim's limits in on newest-wins, then calls this. Both
-        // directions: the retirement on the surviving row, and on the row folded into it.
+        // Store's fold of a duplicate row is `foldLimits`, so this is the code it runs.
+        // Both directions, and the case where merging in the wrong order would cost a
+        // 5h from another source.
         var retiredRow = AccountSnapshot(key: "acct:retired-row")
         retiredRow.absorb(extReport([LimitID.sevenDay: reading(9, tA)], at: tA))
         var staleRow = AccountSnapshot(key: "org:stale-row")
-        staleRow.limits = [LimitID.fiveHour: reading(40, tB)]
+        staleRow.limits = [LimitID.fiveHour: reading(40, tB), LimitID.sevenDay: reading(9, tB)]
 
         var survivorRetired = retiredRow
-        survivorRetired.limits[LimitID.fiveHour] = staleRow.limits[LimitID.fiveHour]
-        survivorRetired.inheritSessionRetirements(from: staleRow)
+        survivorRetired.foldLimits(from: staleRow)
         check("folding in a row that still holds an older 5h does not revive it",
               survivorRetired.limits[LimitID.fiveHour] == nil)
 
         var survivorStale = staleRow
-        survivorStale.inheritSessionRetirements(from: retiredRow)
+        survivorStale.foldLimits(from: retiredRow)
         check("nor does keeping that row and folding the retired one into it",
               survivorStale.limits[LimitID.fiveHour] == nil &&
               survivorStale.sessionRetiredAt?[ReadingSource.ext.rawValue] == tA)
+        check("and the rest of the fold is still newest-wins",
+              survivorStale.limits[LimitID.sevenDay]?.observedAt == tA)
 
-        if let data = try? JSONEncoder().encode(twoProfiles),
-           let back = try? JSONDecoder().decode(AccountSnapshot.self, from: data) {
+        var cliHolder = retiredRow
+        cliHolder.limits[LimitID.fiveHour] = reading(6, tB.addingTimeInterval(-60), .cli)
+        cliHolder.foldLimits(from: staleRow)
+        check("a 5h from another source is not displaced by a retired one",
+              cliHolder.limits[LimitID.fiveHour]?.pct == 6 &&
+              cliHolder.limits[LimitID.fiveHour]?.source == .cli)
+
+        if let data = try? JSONIO.encoder.encode(twoProfiles),
+           let back = try? JSONIO.decoder.decode(AccountSnapshot.self, from: data) {
             check("the retirement survives a save", back.sessionRetiredAt == twoProfiles.sessionRetiredAt)
         } else {
             check("the retirement survives a save", false)

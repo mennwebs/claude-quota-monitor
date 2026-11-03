@@ -472,14 +472,20 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
-    /// Folding a duplicate row into this one, after its limits have been merged: the later
-    /// "no window" per source wins, and a 5h reading either row held from before it goes —
-    /// including one the merge just copied in over this row's own retirement.
-    mutating func inheritSessionRetirements(from other: AccountSnapshot) {
-        if let theirs = other.sessionRetiredAt {
+    /// Folding a duplicate row's readings into this one. Newest observation wins per limit,
+    /// as in `absorb`. The later "no window" per source wins too, and is merged *first*: a
+    /// 5h either row held from before it is neither copied in nor kept, and a 5h this row
+    /// holds from another source is not displaced by one that would only be dropped after.
+    mutating func foldLimits(from victim: AccountSnapshot) {
+        if let theirs = victim.sessionRetiredAt {
             var mine = sessionRetiredAt ?? [:]
             for (source, at) in theirs { mine[source] = max(mine[source] ?? .distantPast, at) }
             sessionRetiredAt = mine
+        }
+        for (id, reading) in victim.limits
+        where (limits[id]?.observedAt ?? .distantPast) < reading.observedAt {
+            if id == LimitID.fiveHour, predatesRetirement(reading) { continue }
+            limits[id] = reading
         }
         dropSessionPredatingRetirement()
     }
