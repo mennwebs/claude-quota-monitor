@@ -244,6 +244,12 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
     var orgId: String?
     var orgName: String?
     var plan: String?
+    /// Which source last set `plan`. The sources word one seat's tier differently — on a
+    /// Team seat claude.ai's organization answers `default_raven` while Claude Code's
+    /// profile answers a Max tier — and the panel decides what a card shows from it, so
+    /// last-writer-wins would make the card change shape every minute. Optional for the
+    /// same decoding reason as `lastContactAt`; see `absorbPlan`.
+    var planSource: ReadingSource?
     var browsers: [String] = []           // which browsers have reported this account
     var sawCLI: Bool = false
     var limits: [String: LimitReading] = [:]
@@ -291,10 +297,25 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
             }
     }
 
+    /// A Team seat, by the name the plan badge would give it.
+    var isTeam: Bool { Fmt.plan(plan) == "Team" }
+
+    /// Whether this card draws its per-model caps at all.
+    ///
+    /// A Team seat's are hidden unless the user asks for them. Team organizations tend not
+    /// to use the models that carry a cap of their own, so the row sits at 0% on every card
+    /// and costs a line of a two-column panel to say nothing. Every other plan keeps them:
+    /// there, a model cap is routinely the one that binds first.
+    func showsModelCaps(onTeam: Bool) -> Bool { !isTeam || onTeam }
+
     /// The ceiling closest to blocking you. Weekly Opus routinely binds before the
     /// 5-hour window does, so "how full am I" cannot just read `five_hour`.
-    func binding(at now: Date) -> Limit? {
-        orderedLimits.max { $0.reading.effectivePct(at: now) < $1.reading.effectivePct(at: now) }
+    ///
+    /// Only over what the card shows: a menu bar glyph filled by a cap the card has hidden
+    /// would be a number with nothing in the panel to explain it.
+    func binding(at now: Date, modelCaps: Bool = true) -> Limit? {
+        (modelCaps ? orderedLimits : structuralLimits)
+            .max { $0.reading.effectivePct(at: now) < $1.reading.effectivePct(at: now) }
     }
 
     /// How recently this account was heard from at all — for the row header. Individual
@@ -353,6 +374,29 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
+    /// The extension's word on the plan outranks the status line's. It reads claude.ai's
+    /// organization, which is what names a Team seat; `~/.claude.json` carries the tier
+    /// Claude Code's profile answered, which on that same seat is a Max tier. The status
+    /// line reports on every render, so letting it write would turn the card back within
+    /// seconds of every extension report. A source may still revise its own word, so a
+    /// plan change seen only by the CLI is not frozen at the old tier.
+    private mutating func absorbPlan(_ incoming: String?, from source: ReadingSource) {
+        guard let incoming else { return }
+        if source != .ext, planSource == .ext { return }
+        plan = incoming
+        planSource = source
+    }
+
+    /// Folding a duplicate row's plan in. The extension's word wins, as in `absorb`;
+    /// short of that, whatever this row already knew.
+    mutating func foldPlan(from victim: AccountSnapshot) {
+        guard let theirs = victim.plan else { return }
+        if plan == nil || (victim.planSource == .ext && planSource != .ext) {
+            plan = theirs
+            planSource = victim.planSource
+        }
+    }
+
     private mutating func noteSource(_ name: String, at when: Date) {
         var seen = sourceSeen ?? [:]
         seen[name] = max(seen[name] ?? .distantPast, when)
@@ -368,7 +412,7 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         email       = r.email       ?? email
         orgId       = r.orgId       ?? orgId
         orgName     = r.orgName     ?? orgName
-        plan        = r.plan        ?? plan
+        absorbPlan(r.plan, from: r.source)
 
         // What the badge claims is that this source is producing readings, so it is
         // stamped with the newest observation in the report rather than with the moment

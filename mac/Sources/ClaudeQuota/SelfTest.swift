@@ -493,6 +493,98 @@ enum SelfTest {
             check("the retirement survives a save", false)
         }
 
+        print("\n▸ A Team seat's model caps — hidden unless asked for")
+        // The 7Sol card: a Team seat whose Fable cap sits at 0% beside a 52% week.
+        var teamSeat = AccountSnapshot(key: "acct:team")
+        teamSeat.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                       limits: [LimitID.sevenDay: reading(52, t0),
+                                                "weekly:fable": reading(0, t0, label: "Fable")],
+                                       receivedAt: t0))
+        check("a raven tier is a Team seat", teamSeat.isTeam)
+        check("its model caps are hidden by default", !teamSeat.showsModelCaps(onTeam: false))
+        check("and shown once the setting is on", teamSeat.showsModelCaps(onTeam: true))
+        check("AppSettings starts with them hidden", AppSettings().showTeamModelCaps == false)
+
+        var maxSeat = AccountSnapshot(key: "acct:max")
+        maxSeat.plan = "default_claude_max_20x"
+        maxSeat.limits = ["weekly:fable": reading(0, t0, label: "Fable")]
+        check("every other plan always shows them",
+              maxSeat.showsModelCaps(onTeam: false) && !maxSeat.isTeam)
+        check("so does a row whose plan nobody has reported",
+              AccountSnapshot(key: "acct:unknown").showsModelCaps(onTeam: false))
+
+        // The menu bar glyph must not be filled by a cap the card has hidden.
+        var spentCap = teamSeat
+        spentCap.limits["weekly:fable"] = reading(90, t0, label: "Fable")
+        check("a hidden cap does not bind the menu bar glyph",
+              spentCap.binding(at: t0, modelCaps: false)?.id == LimitID.sevenDay)
+        check("a shown one still does",
+              spentCap.binding(at: t0, modelCaps: true)?.id == "weekly:fable" &&
+              spentCap.binding(at: t0)?.id == "weekly:fable")
+
+        print("\n▸ The plan — the extension's word outranks the status line's")
+        // claude.ai names a Team seat `default_raven`; Claude Code's profile words the same
+        // seat as a Max tier, and the status line reports on every render. Last-writer-wins
+        // would put the Fable row back on the card within seconds of every extension report.
+        var flipped = teamSeat
+        flipped.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                      limits: [LimitID.sevenDay: reading(52, t0.addingTimeInterval(5), .cli)],
+                                      receivedAt: t0.addingTimeInterval(5)))
+        check("a status line report does not overwrite the extension's plan",
+              flipped.plan == "default_raven" && flipped.isTeam)
+        check("and its readings still land",
+              flipped.limits[LimitID.sevenDay]?.source == .cli)
+
+        var cliOnly = AccountSnapshot(key: "acct:cli-only")
+        cliOnly.absorb(IncomingReport(source: .cli, plan: "default_pro",
+                                      limits: [LimitID.sevenDay: reading(5, t0, .cli)],
+                                      receivedAt: t0))
+        cliOnly.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                      limits: [LimitID.sevenDay: reading(6, t0.addingTimeInterval(60), .cli)],
+                                      receivedAt: t0.addingTimeInterval(60)))
+        check("a source may still revise its own word", cliOnly.plan == "default_claude_max_5x")
+        cliOnly.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                      limits: [LimitID.sevenDay: reading(6, t0.addingTimeInterval(120))],
+                                      receivedAt: t0.addingTimeInterval(120)))
+        check("and the extension's overrides the status line's",
+              cliOnly.plan == "default_raven" && cliOnly.planSource == .ext)
+        cliOnly.absorb(IncomingReport(source: .ext,
+                                      limits: [LimitID.sevenDay: reading(6, t0.addingTimeInterval(180))],
+                                      receivedAt: t0.addingTimeInterval(180)))
+        check("a report with no plan leaves it alone", cliOnly.plan == "default_raven")
+
+        // A row persisted before the plan's source was recorded.
+        var legacyPlan = AccountSnapshot(key: "acct:legacy-plan")
+        legacyPlan.plan = "default_raven"
+        legacyPlan.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                         limits: [LimitID.sevenDay: reading(1, t0)], receivedAt: t0))
+        check("an older row picks up the source on its next extension report",
+              legacyPlan.planSource == .ext)
+
+        // Store folds duplicates through `foldPlan`.
+        var cliRow = AccountSnapshot(key: "email:x")
+        cliRow.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                     limits: [LimitID.sevenDay: reading(1, t0, .cli)], receivedAt: t0))
+        var keptCLI = cliRow
+        keptCLI.foldPlan(from: teamSeat)
+        check("folding in the extension's row takes its plan",
+              keptCLI.plan == "default_raven" && keptCLI.planSource == .ext)
+        var keptExt = teamSeat
+        keptExt.foldPlan(from: cliRow)
+        check("and folding the status line's row into it keeps the extension's",
+              keptExt.plan == "default_raven" && keptExt.planSource == .ext)
+        var blank = AccountSnapshot(key: "org:blank")
+        blank.foldPlan(from: cliRow)
+        check("a row with no plan takes whatever the other knew",
+              blank.plan == "default_claude_max_5x" && blank.planSource == .cli)
+
+        if let data = try? JSONIO.encoder.encode(teamSeat),
+           let back = try? JSONIO.decoder.decode(AccountSnapshot.self, from: data) {
+            check("the plan's source survives a save", back.planSource == .ext)
+        } else {
+            check("the plan's source survives a save", false)
+        }
+
         print("\n▸ Fmt.plan — the names on the badge, not the tier ids")
         check("Max 20x is shown as Ultra", Fmt.plan("default_claude_max_20x") == "Ultra")
         check("an ultra tier id is shown as Ultra", Fmt.plan("default_claude_ultra") == "Ultra")
@@ -684,6 +776,7 @@ enum SelfTest {
             check("settings still decode", s.labels["acct:1"] == "Menn")
             check("and keep the chosen port", s.port == 47821)
             check("a field added since takes its default", s.readQuotaAPI == false)
+            check("Team model caps stay hidden on an older file", s.showTeamModelCaps == false)
         } else { failed += 1; print("  ✗  a settings file from an earlier build no longer decodes") }
 
         // The rule the custom decoder buys: one unreadable field costs that field, not
@@ -711,6 +804,7 @@ enum SelfTest {
         full.readCLIStatusline = false
         full.readStatsCache = false
         full.readQuotaAPI = true
+        full.showTeamModelCaps = true
         if let d = try? JSONIO.encoder.encode(full),
            let back = try? JSONIO.decoder.decode(AppSettings.self, from: d) {
             check("every settings field survives a round trip", back == full)
@@ -722,6 +816,7 @@ enum SelfTest {
         """
         if let a = try? JSONIO.decoder.decode(AccountSnapshot.self, from: Data(earlierAccount.utf8)) {
             check("a state file with no contact field decodes", a.lastContactAt == nil)
+            check("nor a plan source", a.planSource == nil)
             check("and its readings come back", a.limits[LimitID.fiveHour]?.pct == 5)
         } else { failed += 1; print("  ✗  a state file from an earlier build no longer decodes") }
 

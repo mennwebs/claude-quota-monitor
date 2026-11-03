@@ -134,9 +134,11 @@ to renew it. It never refreshes, and it never writes to the keychain.
 
 `plan` is deliberately not taken from the profile. It and claude.ai's
 `/api/organizations/{id}` word the tier differently for the same organization
-(`default_claude_max_5x` against `default_raven`, on one Team seat), and merging is
-last-writer-wins — so carrying both would make a row's plan badge alternate. The tier this
-endpoint reports is shown in Settings instead, beside the account it identifies.
+(`default_claude_max_5x` against `default_raven`, on one Team seat), and the plan decides what a
+Team card shows — so carrying both would make a row's badge and its model-cap row alternate. The
+tier this endpoint reports is shown in Settings instead, beside the account it identifies. The
+status line's tier from `~/.claude.json` is still carried, but an extension-reported plan outranks
+it (`AccountSnapshot.absorbPlan`).
 
 While this source is on, the status line's identity comes from it too. The file-based rule above
 has to infer whose credential Claude Code is using; the profile answers it, from the same auth

@@ -100,10 +100,14 @@ struct AppSettings: Codable, Equatable, Sendable {
     /// Off by default, and it stays that way: turning it on reads a credential that
     /// belongs to Claude Code, which is the user's call rather than a default.
     var readQuotaAPI = false
+    /// Off by default: a Team seat's model caps sit at 0% for most organizations. See
+    /// `AccountSnapshot.showsModelCaps(onTeam:)`.
+    var showTeamModelCaps = false
 
     private enum CodingKeys: String, CodingKey {
         case port, labels, hidden, order, thresholds
         case readCLIStatusline, readStatsCache, readQuotaAPI
+        case showTeamModelCaps
     }
 
     init() {}
@@ -131,6 +135,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         readCLIStatusline = value(.readCLIStatusline, d.readCLIStatusline)
         readStatsCache    = value(.readStatsCache, d.readStatsCache)
         readQuotaAPI      = value(.readQuotaAPI, d.readQuotaAPI)
+        showTeamModelCaps = value(.showTeamModelCaps, d.showTeamModelCaps)
     }
 
     static func load() -> AppSettings {

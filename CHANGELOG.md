@@ -89,6 +89,20 @@ All notable changes to Claude Quota Monitor are documented here.
   `popup.css`, because the tag it looked for was written differently in `popup.html`.
 
 ### Changed
+- **Mac app: a Team card no longer carries a per-model cap row.** Team organizations tend not to
+  use the models that have a weekly cap of their own, so the row sat at `Fable 0%` under every
+  Team card's real numbers. It is hidden by default, along with any other per-model cap on a Team
+  seat, and a hidden cap no longer fills the menu bar glyph either — a bar the panel cannot
+  explain would be worse than none. **ตั้งค่า… → ทั่วไป → แสดงเพดานรายโมเดลของบัญชี Team** brings
+  them back for an organization that does use them. Every other plan shows its caps as before.
+
+  Unlike the 5h rule below, this one goes by the plan rather than by the data: a 0% cap reads the
+  same whether the model is unused or simply not used *yet*, so only the user can say it is noise.
+- **The extension's plan now outranks the status line's.** claude.ai's organization names a Team
+  seat `default_raven`; `~/.claude.json` carries the tier Claude Code's profile answered, which on
+  that same seat is a Max tier. Merging was last-writer-wins, and the status line reports on every
+  render, so a Team seat signed into Claude Code could have its badge — and now its model-cap row —
+  turned back within seconds of each extension report. Each source may still revise its own word.
 - **No 5h row for an account that has no 5-hour window.** Ultra plans and some Team seats have
   no session limit at all, and the API answers `five_hour: null` for them on every call. The
   extension stored that as 0% with no reset time, so every such card in the Mac panel — and the

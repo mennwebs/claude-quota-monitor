@@ -270,7 +270,7 @@ struct AccountCard: View {
                 LimitRow(limit: limit, thresholds: store.settings.thresholds, now: now)
             }
 
-            let models = account.modelLimits(at: now)
+            let models = store.showsModelCaps(account) ? account.modelLimits(at: now) : []
             if !models.isEmpty {
                 ModelGroupRow(limits: models, thresholds: store.settings.thresholds, now: now)
             }

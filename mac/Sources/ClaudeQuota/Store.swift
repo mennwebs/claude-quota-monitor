@@ -202,8 +202,8 @@ final class Store: ObservableObject {
         target.email       = target.email       ?? victim.email
         target.orgId       = target.orgId       ?? victim.orgId
         target.orgName     = target.orgName     ?? victim.orgName
-        target.plan        = target.plan        ?? victim.plan
-        target.sawCLI      = target.sawCLI || victim.sawCLI
+        target.foldPlan(from: victim)
+        target.sawCLI     = target.sawCLI || victim.sawCLI
         target.browsers    = Array(Set(target.browsers).union(victim.browsers)).sorted()
         target.firstSeen   = min(target.firstSeen, victim.firstSeen)
         target.lastContactAt = [target.lastContactAt, victim.lastContactAt].compactMap { $0 }.max()
@@ -241,6 +241,12 @@ final class Store: ObservableObject {
 
     var visibleAccounts: [AccountSnapshot] {
         accounts.filter { !settings.hidden.contains($0.key) }
+    }
+
+    /// One answer for the card and the menu bar glyph, so neither shows a cap the other
+    /// has hidden.
+    func showsModelCaps(_ a: AccountSnapshot) -> Bool {
+        a.showsModelCaps(onTeam: settings.showTeamModelCaps)
     }
 
     func label(for a: AccountSnapshot) -> String {
