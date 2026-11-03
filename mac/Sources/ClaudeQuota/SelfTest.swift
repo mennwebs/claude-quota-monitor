@@ -388,6 +388,121 @@ enum SelfTest {
         check("the status line carries no caps, so its silence retires nothing",
               viaCLI.limits["weekly:opus"] != nil)
 
+        print("\n▸ A 5-hour window the source has stopped reporting")
+        // Exactly the Ultra cards: the extension used to send `five_hour` as 0% with no
+        // reset, and the build that stops sending it must take the row away with it.
+        var ultra = AccountSnapshot(key: "acct:ultra")
+        ultra.limits = [LimitID.fiveHour: reading(0, t0.addingTimeInterval(-60)),
+                        LimitID.sevenDay: reading(5, t0.addingTimeInterval(-60))]
+        ultra.absorb(extReport([LimitID.sevenDay: reading(5, t0),
+                                "weekly:fable": reading(0, t0, label: "Fable")], at: t0))
+        check("a report without five_hour retires the source's own 5h at once",
+              ultra.limits[LimitID.fiveHour] == nil)
+        check("the rest of the report still lands",
+              ultra.limits[LimitID.sevenDay]?.pct == 5 && ultra.limits["weekly:fable"] != nil)
+        check("and the card is left with 7d alone as its ceiling",
+              ultra.structuralLimits.map(\.id) == [LimitID.sevenDay])
+
+        var otherSource = AccountSnapshot(key: "acct:other")
+        otherSource.limits = [LimitID.fiveHour: reading(12, t0.addingTimeInterval(-60), .cli)]
+        otherSource.absorb(extReport([LimitID.sevenDay: reading(5, t0)], at: t0))
+        check("it never speaks for another source's 5h",
+              otherSource.limits[LimitID.fiveHour]?.pct == 12)
+
+        var redelivered = AccountSnapshot(key: "acct:redelivered")
+        redelivered.limits = [LimitID.fiveHour: reading(30, t0)]
+        redelivered.absorb(extReport([LimitID.sevenDay: reading(8, t0.addingTimeInterval(-600))],
+                                     at: t0))
+        check("an older reading re-delivered cannot erase a newer 5h",
+              redelivered.limits[LimitID.fiveHour]?.pct == 30)
+
+        var cliUltra = AccountSnapshot(key: "acct:cli-ultra")
+        cliUltra.limits = [LimitID.fiveHour: reading(0, t0.addingTimeInterval(-60), .cli)]
+        cliUltra.absorb(IncomingReport(source: .cli,
+                                       limits: [LimitID.sevenDay: reading(40, t0, .cli)],
+                                       receivedAt: t0))
+        check("the status line retires its own 5h the same way",
+              cliUltra.limits[LimitID.fiveHour] == nil)
+
+        var stillLive = AccountSnapshot(key: "acct:still-live")
+        stillLive.limits = [LimitID.fiveHour: reading(11, t0.addingTimeInterval(-60))]
+        stillLive.absorb(extReport([LimitID.fiveHour: reading(13, t0),
+                                    LimitID.sevenDay: reading(7, t0)], at: t0))
+        check("an account that still has the window keeps it",
+              stillLive.limits[LimitID.fiveHour]?.pct == 13)
+
+        // Two browser profiles on one account, both `.ext`: B read the window at t0, A saw
+        // none five minutes later. B re-posts its cache every minute until its next fetch —
+        // forever, if that fetch keeps failing — and must not bring the row back each time.
+        var twoProfiles = AccountSnapshot(key: "acct:two-profiles")
+        let tB = t0, tA = t0.addingTimeInterval(300)
+        let fromB = extReport([LimitID.fiveHour: reading(40, tB), LimitID.sevenDay: reading(9, tB)],
+                              at: tB)
+        let fromA = extReport([LimitID.sevenDay: reading(9, tA)], at: tA)
+        twoProfiles.absorb(fromB)
+        twoProfiles.absorb(fromA)
+        check("the newer profile's \"no window\" retires the 5h",
+              twoProfiles.limits[LimitID.fiveHour] == nil)
+        var flapped = false
+        for minute in 1...4 {
+            twoProfiles.absorb(IncomingReport(source: .ext, limits: fromB.limits,
+                                              receivedAt: tA.addingTimeInterval(Double(minute) * 60)))
+            if twoProfiles.limits[LimitID.fiveHour] != nil { flapped = true }
+            twoProfiles.absorb(IncomingReport(source: .ext, limits: fromA.limits,
+                                              receivedAt: tA.addingTimeInterval(Double(minute) * 60 + 30)))
+        }
+        check("the other profile's older re-post cannot bring it back", !flapped)
+        twoProfiles.absorb(extReport([LimitID.fiveHour: reading(2, t0.addingTimeInterval(1200)),
+                                      LimitID.sevenDay: reading(0, t0.addingTimeInterval(1200))],
+                                     at: t0.addingTimeInterval(1200)))
+        check("a newer 5h is the window coming back, and is taken",
+              twoProfiles.limits[LimitID.fiveHour]?.pct == 2)
+
+        // Store's fold of a duplicate row is `foldLimits`, so this is the code it runs.
+        // Both directions, and the case where merging in the wrong order would cost a
+        // 5h from another source.
+        var retiredRow = AccountSnapshot(key: "acct:retired-row")
+        retiredRow.absorb(extReport([LimitID.sevenDay: reading(9, tA)], at: tA))
+        var staleRow = AccountSnapshot(key: "org:stale-row")
+        staleRow.limits = [LimitID.fiveHour: reading(40, tB), LimitID.sevenDay: reading(9, tB)]
+
+        var survivorRetired = retiredRow
+        survivorRetired.foldLimits(from: staleRow)
+        check("folding in a row that still holds an older 5h does not revive it",
+              survivorRetired.limits[LimitID.fiveHour] == nil)
+
+        var survivorStale = staleRow
+        survivorStale.foldLimits(from: retiredRow)
+        check("nor does keeping that row and folding the retired one into it",
+              survivorStale.limits[LimitID.fiveHour] == nil &&
+              survivorStale.sessionRetiredAt?[ReadingSource.ext.rawValue] == tA)
+        check("and the rest of the fold is still newest-wins",
+              survivorStale.limits[LimitID.sevenDay]?.observedAt == tA)
+
+        var cliHolder = retiredRow
+        cliHolder.limits[LimitID.fiveHour] = reading(6, tB.addingTimeInterval(-60), .cli)
+        cliHolder.foldLimits(from: staleRow)
+        check("a 5h from another source is not displaced by a retired one",
+              cliHolder.limits[LimitID.fiveHour]?.pct == 6 &&
+              cliHolder.limits[LimitID.fiveHour]?.source == .cli)
+
+        if let data = try? JSONIO.encoder.encode(twoProfiles),
+           let back = try? JSONIO.decoder.decode(AccountSnapshot.self, from: data) {
+            check("the retirement survives a save", back.sessionRetiredAt == twoProfiles.sessionRetiredAt)
+        } else {
+            check("the retirement survives a save", false)
+        }
+
+        print("\n▸ Fmt.plan — the names on the badge, not the tier ids")
+        check("Max 20x is shown as Ultra", Fmt.plan("default_claude_max_20x") == "Ultra")
+        check("an ultra tier id is shown as Ultra", Fmt.plan("default_claude_ultra") == "Ultra")
+        check("Max 5x keeps its name", Fmt.plan("default_claude_max_5x") == "Max 5x")
+        check("a bare Max stays Max", Fmt.plan("default_claude_max") == "Max")
+        check("a Team seat's codename is shown as Team", Fmt.plan("default_raven") == "Team")
+        check("Pro is unchanged", Fmt.plan("default_pro") == "Pro")
+        check("an unknown tier still reads", Fmt.plan("default_claude_enterprise") == "Claude Enterprise")
+        check("no tier, no badge", Fmt.plan(nil) == nil && Fmt.plan("  ") == nil)
+
         print("\n▸ Source badges")
         var badged = AccountSnapshot(key: "acct:badges")
         badged.sourceSeen = ["Chrome": t0, "Seed": t0]

@@ -109,40 +109,50 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 /* ── Badge ── */
-// A per-model weekly ceiling can block before the 5h session does, so the badge tracks
-// whichever is closer to 100. The prefix says which: S = session, otherwise the first
-// letter of the model (O = Opus, F = Fable, …).
+// Whichever ceiling is closest to 100 is the one that will stop you, so that is the one
+// the badge shows. The prefix says which: S = the 5-hour session, W = the weekly cap
+// across all models, otherwise the first letter of the model (O = Opus, F = Fable, …).
+// The session only competes when the account has one — Ultra plans and some Team seats
+// do not — and the weekly cap always does: it used to be left out, so an account with
+// the week spent read S0.
 //
 // Written against the dynamic weeklyScoped list rather than a named model: the whole
 // point of the API's `limits` array is that new models appear without a code change.
+// Ties go to the earlier candidate, so the session wins over a weekly cap at the same %.
 function bindingLimit(u) {
-  let binding = { key: 'S', pct: u.percent ?? 0 };
+  const { hasSession } = self.CQMUsage;
+  const candidates = [];
+  if (hasSession(u)) candidates.push({ key: 'S', pct: u.percent });
+  if (Number.isFinite(u.weeklyPercent)) candidates.push({ key: 'W', pct: u.weeklyPercent });
   for (const cat of u.weeklyScoped || []) {
-    const pct = cat?.percent ?? 0;
-    if (pct > binding.pct) {
-      binding = { key: (cat.name || '?').trim().charAt(0).toUpperCase() || '?', pct };
-    }
+    if (!cat) continue;
+    const key = String(cat.name ?? '').trim().charAt(0).toUpperCase() || '?';
+    candidates.push({ key, pct: Number.isFinite(cat.percent) ? cat.percent : 0 });
   }
-  return binding;
+  return candidates.reduce((best, c) => (best && best.pct >= c.pct ? best : c), null);
 }
 
 function buildTitle(u) {
-  if (!u || u.percent === undefined) return 'Claude Quota Monitor';
+  const { hasReading, hasSession } = self.CQMUsage;
+  if (!hasReading(u)) return 'Claude Quota Monitor';
   const strip = (s) => s.replace(/\s*\(.*?\)/g, '').trim();
   const s = strip(chrome.i18n.getMessage('session_label') || 'Session');
   const w = strip(chrome.i18n.getMessage('weekly_label')  || 'Weekly');
-  let title = `${s}: ${u.percent}%`;
-  if (u.weeklyPercent !== undefined) title += ` · ${w}: ${u.weeklyPercent}%`;
+  const parts = [];
+  if (hasSession(u)) parts.push(`${s}: ${u.percent}%`);
+  if (Number.isFinite(u.weeklyPercent)) parts.push(`${w}: ${u.weeklyPercent}%`);
   // Categorias por modelo (Fable, Sonnet, Opus, etc.)
   (u.weeklyScoped || []).forEach(cat => {
-    if (cat?.name != null) title += ` · ${cat.name}: ${cat.percent ?? 0}%`;
+    if (cat?.name != null) parts.push(`${cat.name}: ${cat.percent ?? 0}%`);
   });
-  return title;
+  return parts.join(' · ');
 }
 
 function updateBadge(u) {
-  if (u?.percent === undefined) return;
-  const { key, pct } = bindingLimit(u);
+  if (!self.CQMUsage.hasReading(u)) return;
+  const binding = bindingLimit(u);
+  if (!binding) return;
+  const { key, pct } = binding;
   chrome.action.setBadgeText({ text: `${key}${Math.round(pct)}` });
   chrome.action.setBadgeBackgroundColor({
     color: pct >= 90 ? '#e53e3e' : pct >= 70 ? '#dd6b20' : '#2f855a'

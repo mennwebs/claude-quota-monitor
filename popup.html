@@ -75,16 +75,18 @@
         </div>
       </div>
 
-      <!-- Sessão (5h) -->
-      <div class="stat-label" data-i18n="session_label"></div>
-      <div class="bar-wrapper">
-        <div id="bar" class="bar"></div>
-      </div>
-      <div class="bar-meta">
-        <span id="pct-text">—</span>
-        <div class="reset-chip">
-          <span class="muted" data-i18n="resets_in"></span>
-          <span id="reset-text">—</span>
+      <!-- Sessão (5h) — hidden for an account with no 5-hour window (Ultra, some Team seats) -->
+      <div id="session-row">
+        <div class="stat-label" data-i18n="session_label"></div>
+        <div class="bar-wrapper">
+          <div id="bar" class="bar"></div>
+        </div>
+        <div class="bar-meta">
+          <span id="pct-text">—</span>
+          <div class="reset-chip">
+            <span class="muted" data-i18n="resets_in"></span>
+            <span id="reset-text">—</span>
+          </div>
         </div>
       </div>
 
@@ -169,6 +171,7 @@
       </button>
     </footer>
   </div>
+  <script src="usage.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

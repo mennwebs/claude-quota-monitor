@@ -41,6 +41,15 @@ Headers: `Content-Type: application/json`, `X-CQM-Token: <token from the app>`
 - `slug` is the display name lowercased with runs of non-alphanumerics collapsed to `-`, capped
   at 32 characters. Keys that do not fit that shape are dropped, and a single report may carry
   at most 16 limits: open-ended is not the same as unbounded.
+- `five_hour` may be absent, and absent means the account has no 5-hour window. Ultra plans and
+  some Team seats have none at all; an account that does have one loses it while its weekly cap
+  is spent. Leave the key out — never send a placeholder `0` — because the app retires a
+  source's own `five_hour` reading as soon as that source posts a newer report without one, and
+  a 0% would keep an idle-looking row on a card whose plan has no such limit. "Source" is the
+  kind (`extension`, `cli`, `api`), not the browser profile, and the absence is remembered: a
+  `five_hour` from that source observed *before* it is refused, so a second profile re-posting
+  an older cache cannot bring the row back. A newer one is the window returning, and is taken.
+  Another source's reading is left alone.
 - The old `seven_day_opus` / `seven_day_sonnet` / `seven_day_design` keys are still accepted and
   translated, so a profile running an older extension build keeps reporting.
 - A report with no recognized limit is rejected, because an empty report would refresh a row's

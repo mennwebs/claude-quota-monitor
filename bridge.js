@@ -104,6 +104,8 @@
       if (label) limits[key].label = label;
     };
 
+    // Null when the account has no 5-hour window (Ultra, some Team seats), and then the
+    // key is left out: the app reads its absence as "no window" and retires the row.
     put('five_hour', usage.percent, usage.resetAt);
     put('seven_day', usage.weeklyPercent, usage.weeklyResetAt);
 

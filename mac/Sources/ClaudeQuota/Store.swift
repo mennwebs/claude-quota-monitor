@@ -212,9 +212,7 @@ final class Store: ObservableObject {
             for (name, when) in inherited { seen[name] = max(seen[name] ?? .distantPast, when) }
             target.sourceSeen = seen
         }
-        for (k, r) in victim.limits where (target.limits[k]?.observedAt ?? .distantPast) < r.observedAt {
-            target.limits[k] = r
-        }
+        target.foldLimits(from: victim)
         if let e = victim.extra, (target.extra?.observedAt ?? .distantPast) < e.observedAt {
             target.extra = e
         }
