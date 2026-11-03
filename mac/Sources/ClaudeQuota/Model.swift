@@ -396,6 +396,9 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
     /// Newest observation wins, as it does for limits. The stamp is the reading's own time,
     /// not the report's arrival: the extension re-posts its cache every minute whether or not
     /// its fetch is working, and a re-delivery of an hour-old plan is not a new statement.
+    /// A fresh fetch does restamp it, though: the extension reads its tier once and carries it
+    /// until claude.ai is next opened in that profile, so its word is only as current as that
+    /// cache — two profiles caching different tiers still alternate fetch by fetch.
     ///
     /// One exception. Against the other sources, the extension's latest word stands while it
     /// says "Team" and is fresh. It reads claude.ai's organization, the only source that names
