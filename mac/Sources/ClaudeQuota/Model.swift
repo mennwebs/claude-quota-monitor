@@ -232,6 +232,20 @@ struct ExtraUsage: Codable, Equatable, Sendable {
     var pct: Double { limit > 0 ? min(100, used / limit * 100) : 0 }
 }
 
+// MARK: - Plan
+
+/// One source's word on an account's tier, stamped with the reading it arrived beside.
+struct PlanStatement: Codable, Equatable, Sendable {
+    var plan: String
+    var at: Date
+
+    /// Strict, total order: by time, then by text, so two statements stamped alike still
+    /// settle the same way whichever arrived first.
+    static func order(_ a: PlanStatement, _ b: PlanStatement) -> Bool {
+        (a.at, a.plan) < (b.at, b.plan)
+    }
+}
+
 // MARK: - Account
 
 /// Everything we know about one Claude account, merged from every source that
@@ -244,6 +258,14 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
     var orgId: String?
     var orgName: String?
     var plan: String?
+    /// Each source's latest word on the plan, keyed by `ReadingSource.rawValue`. `plan` is
+    /// derived from these by `resolvePlan` rather than overwritten by whichever report came
+    /// last: the sources word one seat's tier differently — on a Team seat claude.ai's
+    /// organization answers `default_raven` while Claude Code's profile answers a Max tier —
+    /// and the panel decides what a card shows from it. Kept per source, rather than only
+    /// the winner, so folding two rows reaches exactly what absorbing their reports in turn
+    /// would. Optional for the same decoding reason as `lastContactAt`.
+    var planStatements: [String: PlanStatement]?
     var browsers: [String] = []           // which browsers have reported this account
     var sawCLI: Bool = false
     var limits: [String: LimitReading] = [:]
@@ -291,10 +313,25 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
             }
     }
 
+    /// A Team seat, by the name the plan badge would give it.
+    var isTeam: Bool { Fmt.plan(plan) == "Team" }
+
+    /// Whether this card draws its per-model caps at all.
+    ///
+    /// A Team seat's are hidden unless the user asks for them. Team organizations tend not
+    /// to use the models that carry a cap of their own, so the row sits at 0% on every card
+    /// and costs a line of a two-column panel to say nothing. Every other plan keeps them:
+    /// there, a model cap is routinely the one that binds first.
+    func showsModelCaps(onTeam: Bool) -> Bool { !isTeam || onTeam }
+
     /// The ceiling closest to blocking you. Weekly Opus routinely binds before the
     /// 5-hour window does, so "how full am I" cannot just read `five_hour`.
-    func binding(at now: Date) -> Limit? {
-        orderedLimits.max { $0.reading.effectivePct(at: now) < $1.reading.effectivePct(at: now) }
+    ///
+    /// Only over what the card shows: a menu bar glyph filled by a cap the card has hidden
+    /// would be a number with nothing in the panel to explain it.
+    func binding(at now: Date, modelCaps: Bool = true) -> Limit? {
+        (modelCaps ? orderedLimits : structuralLimits)
+            .max { $0.reading.effectivePct(at: now) < $1.reading.effectivePct(at: now) }
     }
 
     /// How recently this account was heard from at all — for the row header. Individual
@@ -353,6 +390,56 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
+    /// The plan a set of statements adds up to. Pure, and independent of the order they
+    /// arrived in.
+    ///
+    /// Newest observation wins, as it does for limits. The stamp is the reading's own time,
+    /// not the report's arrival: the extension re-posts its cache every minute whether or not
+    /// its fetch is working, and a re-delivery of an hour-old plan is not a new statement.
+    /// A fresh fetch does restamp it, though: the extension reads its tier once and carries it
+    /// until claude.ai is next opened in that profile, so its word is only as current as that
+    /// cache — two profiles caching different tiers still alternate fetch by fetch.
+    ///
+    /// One exception. Against the other sources, the extension's latest word stands while it
+    /// says "Team" and is fresh. It reads claude.ai's organization, the only source that names
+    /// a Team seat at all; `~/.claude.json` carries the tier Claude Code's profile answered,
+    /// which on that same seat is a Max tier, and the status line stamps a reading the moment
+    /// it renders — so newest-wins alone would turn the card back, badge and model-cap row
+    /// both, within seconds of every extension report. Narrow on purpose: elsewhere the
+    /// sources read the same `rate_limit_tier`, and the extension caches its tier until
+    /// claude.ai is next opened in that profile, so it is not the fresher word in general.
+    /// The hold lapses on the badge's horizon — the app's existing answer to "is this source
+    /// still feeding the row" — after which the status line's tier, if it carries one, wins.
+    static func resolvePlan(_ all: [String: PlanStatement]) -> String? {
+        let ext = all[ReadingSource.ext.rawValue]
+        let other = all.filter { $0.key != ReadingSource.ext.rawValue }.values.max(by: PlanStatement.order)
+        switch (ext, other) {
+        case (nil, nil): return nil
+        case (let e?, nil): return e.plan
+        case (nil, let o?): return o.plan
+        case (let e?, let o?):
+            if Fmt.plan(e.plan) == "Team", o.at.timeIntervalSince(e.at) < sourceBadgeAge { return e.plan }
+            return PlanStatement.order(e, o) ? o.plan : e.plan
+        }
+    }
+
+    /// Keep a source's newest statement, and re-derive the plan from the set.
+    private mutating func notePlan(_ statement: PlanStatement, from source: String) {
+        var all = planStatements ?? [:]
+        if let held = all[source], !PlanStatement.order(held, statement) { return }
+        all[source] = statement
+        planStatements = all
+        plan = Self.resolvePlan(all) ?? plan
+    }
+
+    /// Folding a duplicate row's plan in: each source's newest statement across both rows,
+    /// then the same derivation `absorb` uses. A row persisted before statements were kept
+    /// still lends its plan to one that has none.
+    mutating func foldPlan(from victim: AccountSnapshot) {
+        for (source, statement) in victim.planStatements ?? [:] { notePlan(statement, from: source) }
+        if plan == nil { plan = victim.plan }
+    }
+
     private mutating func noteSource(_ name: String, at when: Date) {
         var seen = sourceSeen ?? [:]
         seen[name] = max(seen[name] ?? .distantPast, when)
@@ -368,12 +455,13 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         email       = r.email       ?? email
         orgId       = r.orgId       ?? orgId
         orgName     = r.orgName     ?? orgName
-        plan        = r.plan        ?? plan
 
         // What the badge claims is that this source is producing readings, so it is
         // stamped with the newest observation in the report rather than with the moment
-        // the report arrived. A source re-delivering yesterday's numbers is not live.
+        // the report arrived. A source re-delivering yesterday's numbers is not live — and
+        // the plan riding along with them is not a new statement either.
         let observed = r.limits.values.map(\.observedAt).max() ?? r.receivedAt
+        if let p = r.plan { notePlan(PlanStatement(plan: p, at: observed), from: r.source.rawValue) }
         switch r.source {
         case .cli:
             sawCLI = true

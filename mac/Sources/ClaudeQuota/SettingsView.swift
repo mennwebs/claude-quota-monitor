@@ -71,6 +71,10 @@ private struct GeneralSettings: View {
                 if let loginError {
                     Text(loginError).font(.caption).foregroundStyle(.orange)
                 }
+
+                Toggle("แสดงเพดานรายโมเดลของบัญชี Team", isOn: $store.settings.showTeamModelCaps)
+                Text("Team ส่วนใหญ่ไม่ได้ใช้โมเดลที่มีเพดานแยก (เช่น Fable) แถวนี้จึงค้างที่ 0% · ปิดไว้จะไม่ขึ้นบนการ์ด Team และไม่นับในแท่งบนเมนูบาร์ · บัญชีแบบอื่นแสดงเสมอ · รู้ว่าเป็น Team จากแพลนที่ extension รายงาน")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("จังหวะการใช้") {

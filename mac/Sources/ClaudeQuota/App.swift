@@ -46,7 +46,9 @@ struct MenuBarLabel: View {
 
     private var bars: [MenuBarIcon.Bar] {
         store.visibleAccounts.map { account in
-            guard let reading = account.binding(at: store.now)?.reading else {
+            guard let reading = account.binding(at: store.now,
+                                                modelCaps: store.showsModelCaps(account))?.reading
+            else {
                 return MenuBarIcon.Bar(pct: 0, color: .systemGray, grayed: true, awaitingReset: false)
             }
             // The bar's own reading decides whether it is trustworthy. The account may

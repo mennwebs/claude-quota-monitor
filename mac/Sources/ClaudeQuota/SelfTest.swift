@@ -493,6 +493,253 @@ enum SelfTest {
             check("the retirement survives a save", false)
         }
 
+        print("\n▸ A Team seat's model caps — hidden unless asked for")
+        let t1 = t0.addingTimeInterval(60)
+        // The 7Sol card: a Team seat whose Fable cap sits at 0% beside a 52% week.
+        var teamSeat = AccountSnapshot(key: "acct:team")
+        teamSeat.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                       limits: [LimitID.sevenDay: reading(52, t0),
+                                                "weekly:fable": reading(0, t0, label: "Fable")],
+                                       receivedAt: t0))
+        check("a raven tier is a Team seat", teamSeat.isTeam)
+        check("its model caps are hidden by default", !teamSeat.showsModelCaps(onTeam: false))
+        check("and shown once the setting is on", teamSeat.showsModelCaps(onTeam: true))
+        check("AppSettings starts with them hidden", AppSettings().showTeamModelCaps == false)
+
+        var maxSeat = AccountSnapshot(key: "acct:max")
+        maxSeat.plan = "default_claude_max_20x"
+        maxSeat.limits = ["weekly:fable": reading(0, t0, label: "Fable")]
+        check("every other plan always shows them",
+              maxSeat.showsModelCaps(onTeam: false) && !maxSeat.isTeam)
+        check("so does a row whose plan nobody has reported",
+              AccountSnapshot(key: "acct:unknown").showsModelCaps(onTeam: false))
+
+        // The menu bar glyph must not be filled by a cap the card has hidden.
+        var spentCap = teamSeat
+        spentCap.limits["weekly:fable"] = reading(90, t0, label: "Fable")
+        check("a hidden cap does not bind the menu bar glyph",
+              spentCap.binding(at: t0, modelCaps: false)?.id == LimitID.sevenDay)
+        check("a shown one still does",
+              spentCap.binding(at: t0, modelCaps: true)?.id == "weekly:fable" &&
+              spentCap.binding(at: t0)?.id == "weekly:fable")
+
+        print("\n▸ The plan — the extension's \"Team\" holds against the status line's tier")
+        // claude.ai names a Team seat `default_raven`; Claude Code's profile words the same
+        // seat as a Max tier, and the status line reports on every render. Last-writer-wins
+        // would put the Fable row back on the card within seconds of every extension report.
+        var flipped = teamSeat
+        flipped.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                      limits: [LimitID.sevenDay: reading(52, t0.addingTimeInterval(5), .cli)],
+                                      receivedAt: t0.addingTimeInterval(5)))
+        check("a status line report does not overwrite the extension's plan",
+              flipped.plan == "default_raven" && flipped.isTeam)
+        check("and its readings still land",
+              flipped.limits[LimitID.sevenDay]?.source == .cli)
+
+        // The hold is only for the disagreement it exists for. Elsewhere the sources read
+        // the same tier, and the extension's is cached until claude.ai is next opened.
+        var upgraded = AccountSnapshot(key: "acct:upgraded")
+        upgraded.absorb(IncomingReport(source: .ext, plan: "default_claude_max_5x",
+                                       limits: [LimitID.sevenDay: reading(5, t0)], receivedAt: t0))
+        upgraded.absorb(IncomingReport(source: .cli, plan: "default_claude_max_20x",
+                                       limits: [LimitID.sevenDay: reading(5, t0.addingTimeInterval(60), .cli)],
+                                       receivedAt: t0.addingTimeInterval(60)))
+        check("a non-Team plan from the extension does not hold off the status line",
+              upgraded.plan == "default_claude_max_20x")
+
+        // And it lapses with the extension: a profile gone quiet must not pin the card.
+        let lapsed = t0.addingTimeInterval(AccountSnapshot.sourceBadgeAge + 60)
+        var leftTeam = teamSeat
+        leftTeam.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                       limits: [LimitID.sevenDay: reading(5, lapsed, .cli)],
+                                       receivedAt: lapsed))
+        check("an extension silent past the badge's age no longer holds the plan",
+              leftTeam.plan == "default_claude_max_5x" && !leftTeam.isTeam)
+
+        var restated = teamSeat
+        let later = t0.addingTimeInterval(AccountSnapshot.sourceBadgeAge - 600)
+        restated.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                       limits: [LimitID.sevenDay: reading(52, later)], receivedAt: later))
+        restated.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                       limits: [LimitID.sevenDay: reading(52, lapsed, .cli)],
+                                       receivedAt: lapsed))
+        check("each extension report renews the hold", restated.plan == "default_raven")
+
+        // The extension re-posts its cache every minute even while its fetch is failing.
+        // Those re-posts must neither renew the hold nor, once it has lapsed, flip the card
+        // back each minute against the status line.
+        var frozen = teamSeat
+        for minute in stride(from: 60.0, through: AccountSnapshot.sourceBadgeAge + 600, by: 60) {
+            frozen.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                         limits: [LimitID.sevenDay: reading(52, t0)],
+                                         receivedAt: t0.addingTimeInterval(minute)))
+        }
+        let afterFreeze = t0.addingTimeInterval(AccountSnapshot.sourceBadgeAge + 660)
+        frozen.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                     limits: [LimitID.sevenDay: reading(52, afterFreeze, .cli)],
+                                     receivedAt: afterFreeze))
+        check("a re-posted cache does not renew the hold", frozen.plan == "default_claude_max_5x")
+        frozen.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                     limits: [LimitID.sevenDay: reading(52, t0)],
+                                     receivedAt: afterFreeze.addingTimeInterval(60)))
+        check("nor take the plan back from a newer statement", frozen.plan == "default_claude_max_5x")
+
+        // First launch of a build, or a new row: the status line speaks first, freshly
+        // stamped, and the extension's next re-post carries a reading minutes older.
+        var cliFirst = AccountSnapshot(key: "acct:cli-first")
+        cliFirst.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                       limits: [LimitID.sevenDay: reading(52, t1, .cli)],
+                                       receivedAt: t1))
+        cliFirst.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                       limits: [LimitID.sevenDay: reading(52, t0)],
+                                       receivedAt: t1.addingTimeInterval(5)))
+        check("an extension Team minutes older than the status line still takes the card",
+              cliFirst.plan == "default_raven")
+
+        // And a seat that left Team says so through the extension too: same source, newest wins.
+        var leaver = teamSeat
+        leaver.absorb(IncomingReport(source: .ext, plan: "default_claude_max_5x",
+                                     limits: [LimitID.sevenDay: reading(5, t1)], receivedAt: t1))
+        check("the extension can take its own Team back", leaver.plan == "default_claude_max_5x")
+
+        var cliOnly = AccountSnapshot(key: "acct:cli-only")
+        cliOnly.absorb(IncomingReport(source: .cli, plan: "default_pro",
+                                      limits: [LimitID.sevenDay: reading(5, t0, .cli)],
+                                      receivedAt: t0))
+        cliOnly.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                      limits: [LimitID.sevenDay: reading(6, t0.addingTimeInterval(60), .cli)],
+                                      receivedAt: t0.addingTimeInterval(60)))
+        check("a source may still revise its own word", cliOnly.plan == "default_claude_max_5x")
+        cliOnly.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                      limits: [LimitID.sevenDay: reading(6, t0.addingTimeInterval(120))],
+                                      receivedAt: t0.addingTimeInterval(120)))
+        check("and the extension's overrides the status line's",
+              cliOnly.plan == "default_raven")
+        cliOnly.absorb(IncomingReport(source: .ext,
+                                      limits: [LimitID.sevenDay: reading(6, t0.addingTimeInterval(180))],
+                                      receivedAt: t0.addingTimeInterval(180)))
+        check("a report with no plan leaves it alone", cliOnly.plan == "default_raven")
+
+        // A row persisted before the plan's source was recorded.
+        var legacyPlan = AccountSnapshot(key: "acct:legacy-plan")
+        legacyPlan.plan = "default_raven"
+        legacyPlan.absorb(IncomingReport(source: .ext, plan: "default_raven",
+                                         limits: [LimitID.sevenDay: reading(1, t0)], receivedAt: t0))
+        check("an older row picks up the source on its next extension report",
+              legacyPlan.planStatements?[ReadingSource.ext.rawValue] != nil && legacyPlan.plan == "default_raven")
+
+        // Store folds duplicates through `foldPlan`.
+        var cliRow = AccountSnapshot(key: "email:x")
+        cliRow.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                     limits: [LimitID.sevenDay: reading(1, t1, .cli)], receivedAt: t1))
+        var keptCLI = cliRow
+        keptCLI.foldPlan(from: teamSeat)
+        check("folding in the extension's row takes its plan",
+              keptCLI.plan == "default_raven" && keptCLI.planStatements?[ReadingSource.ext.rawValue] != nil)
+        var keptExt = teamSeat
+        keptExt.foldPlan(from: cliRow)
+        check("and folding the status line's row into it keeps the extension's",
+              keptExt.plan == "default_raven")
+        var olderExt = teamSeat
+        olderExt.foldPlan(from: restated)
+        var newerExt = restated
+        newerExt.foldPlan(from: teamSeat)
+        check("between two extension plans the fold keeps the more recent, either way",
+              olderExt.planStatements?[ReadingSource.ext.rawValue]?.at == later && newerExt.planStatements?[ReadingSource.ext.rawValue]?.at == later)
+
+        // The `upgraded` reports, split across two rows: folding must reach what absorbing
+        // them in turn did.
+        var extMax = AccountSnapshot(key: "acct:ext-max")
+        extMax.absorb(IncomingReport(source: .ext, plan: "default_claude_max_5x",
+                                     limits: [LimitID.sevenDay: reading(5, t0)], receivedAt: t0))
+        var cliMax = AccountSnapshot(key: "email:cli-max")
+        cliMax.absorb(IncomingReport(source: .cli, plan: "default_claude_max_20x",
+                                     limits: [LimitID.sevenDay: reading(5, t1, .cli)], receivedAt: t1))
+        var foldA = extMax, foldB = cliMax
+        foldA.foldPlan(from: cliMax)
+        foldB.foldPlan(from: extMax)
+        check("a fold takes the newer non-Team plan, whichever row survives",
+              foldA.plan == "default_claude_max_20x" && foldB.plan == "default_claude_max_20x")
+
+        var staleTeam = teamSeat
+        var freshCLI = AccountSnapshot(key: "email:fresh")
+        freshCLI.absorb(IncomingReport(source: .cli, plan: "default_claude_max_5x",
+                                       limits: [LimitID.sevenDay: reading(5, lapsed, .cli)],
+                                       receivedAt: lapsed))
+        staleTeam.foldPlan(from: freshCLI)
+        freshCLI.foldPlan(from: teamSeat)
+        check("and a lapsed Team plan does not win a fold",
+              staleTeam.plan == "default_claude_max_5x" && freshCLI.plan == "default_claude_max_5x")
+
+        var legacyVictim = AccountSnapshot(key: "email:legacy")
+        legacyVictim.plan = "default_pro"
+        var noPlan = AccountSnapshot(key: "acct:no-plan")
+        noPlan.foldPlan(from: legacyVictim)
+        check("a row from before statements were kept still lends its plan", noPlan.plan == "default_pro")
+
+        var blank = AccountSnapshot(key: "org:blank")
+        blank.foldPlan(from: cliRow)
+        check("a row with no plan takes whatever the other knew",
+              blank.plan == "default_claude_max_5x")
+
+        // Two profiles on one account: A still caches the Max tier it read before the seat
+        // moved, B reads Team. A status line report between them must not let B's older
+        // re-post take back a card A has already contradicted.
+        var twoTiers = AccountSnapshot(key: "acct:two-tiers")
+        let e1 = t0, e2 = t0.addingTimeInterval(600), c = t0.addingTimeInterval(900)
+        func ext(_ plan: String, _ at: Date, receivedAt: Date) -> IncomingReport {
+            IncomingReport(source: .ext, plan: plan, limits: [LimitID.sevenDay: reading(5, at)],
+                           receivedAt: receivedAt)
+        }
+        twoTiers.absorb(ext("default_raven", e1, receivedAt: e1))
+        twoTiers.absorb(ext("default_claude_max_5x", e2, receivedAt: e2))
+        twoTiers.absorb(IncomingReport(source: .cli, plan: "default_claude_max_20x",
+                                       limits: [LimitID.sevenDay: reading(5, c, .cli)], receivedAt: c))
+        twoTiers.absorb(ext("default_raven", e1, receivedAt: c.addingTimeInterval(30)))
+        check("an extension Team since contradicted cannot win the card back",
+              twoTiers.plan == "default_claude_max_20x")
+
+        // Folding must land where absorbing the same reports in turn would. Deterministic
+        // pseudo-random streams, split across two rows, folded both ways round.
+        var lcg: UInt64 = 0x5eed
+        func next(_ n: Int) -> Int {
+            lcg = lcg &* 6364136223846793005 &+ 1442695040888963407
+            return Int((lcg >> 33) % UInt64(n))
+        }
+        let kinds: [(ReadingSource, String)] = [(.ext, "default_raven"), (.ext, "default_claude_max_5x"),
+                                                (.cli, "default_claude_max_5x"), (.cli, "default_claude_max_20x")]
+        var mismatches = 0
+        for _ in 0..<3000 {
+            var used = Set<Int>()
+            var stream: [(Int, IncomingReport)] = []
+            for _ in 0..<(2 + next(5)) {
+                var minute = next(480)
+                while used.contains(minute) { minute = next(480) }
+                used.insert(minute)
+                let (src, plan) = kinds[next(kinds.count)]
+                let at = t0.addingTimeInterval(Double(minute) * 60)
+                stream.append((next(2), IncomingReport(source: src, plan: plan,
+                                                       limits: [LimitID.sevenDay: reading(5, at, src)],
+                                                       receivedAt: at)))
+            }
+            stream.sort { $0.1.receivedAt < $1.1.receivedAt }
+            var whole = AccountSnapshot(key: "acct:whole")
+            var rows = [AccountSnapshot(key: "acct:a"), AccountSnapshot(key: "email:b")]
+            for (side, r) in stream { whole.absorb(r); rows[side].absorb(r) }
+            var ab = rows[0], ba = rows[1]
+            ab.foldPlan(from: rows[1])
+            ba.foldPlan(from: rows[0])
+            if ab.plan != whole.plan || ba.plan != whole.plan { mismatches += 1 }
+        }
+        check("a fold reaches what absorbing in turn does, over 3000 streams", mismatches == 0)
+
+        if let data = try? JSONIO.encoder.encode(teamSeat),
+           let back = try? JSONIO.decoder.decode(AccountSnapshot.self, from: data) {
+            check("the plan statements survive a save", back.planStatements == teamSeat.planStatements && back.planStatements != nil)
+        } else {
+            check("the plan statements survive a save", false)
+        }
+
         print("\n▸ Fmt.plan — the names on the badge, not the tier ids")
         check("Max 20x is shown as Ultra", Fmt.plan("default_claude_max_20x") == "Ultra")
         check("an ultra tier id is shown as Ultra", Fmt.plan("default_claude_ultra") == "Ultra")
@@ -684,6 +931,7 @@ enum SelfTest {
             check("settings still decode", s.labels["acct:1"] == "Menn")
             check("and keep the chosen port", s.port == 47821)
             check("a field added since takes its default", s.readQuotaAPI == false)
+            check("Team model caps stay hidden on an older file", s.showTeamModelCaps == false)
         } else { failed += 1; print("  ✗  a settings file from an earlier build no longer decodes") }
 
         // The rule the custom decoder buys: one unreadable field costs that field, not
@@ -711,6 +959,7 @@ enum SelfTest {
         full.readCLIStatusline = false
         full.readStatsCache = false
         full.readQuotaAPI = true
+        full.showTeamModelCaps = true
         if let d = try? JSONIO.encoder.encode(full),
            let back = try? JSONIO.decoder.decode(AppSettings.self, from: d) {
             check("every settings field survives a round trip", back == full)
@@ -722,6 +971,7 @@ enum SelfTest {
         """
         if let a = try? JSONIO.decoder.decode(AccountSnapshot.self, from: Data(earlierAccount.utf8)) {
             check("a state file with no contact field decodes", a.lastContactAt == nil)
+            check("nor plan statements", a.planStatements == nil)
             check("and its readings come back", a.limits[LimitID.fiveHour]?.pct == 5)
         } else { failed += 1; print("  ✗  a state file from an earlier build no longer decodes") }
 
@@ -777,8 +1027,8 @@ enum SelfTest {
             check("the account is named", id.accountUuid == "acc-1")
             check("the email is lowercased, as every other path stores it", id.email == "me@example.com")
             check("the organization rides along", id.orgId == "org-1" && id.orgName == "SeedWebs")
-            // This endpoint and claude.ai word the tier differently for one org, and
-            // `absorb` is last-writer-wins — so sending both would make the badge alternate.
+            // This endpoint words a Team seat as a Max tier, so carrying it would badge a
+            // Team card as Max wherever the extension is not reporting it.
             check("the plan is deliberately not carried", id.plan == nil)
         } else { failed += 1; print("  ✗  a well-formed profile did not parse") }
 

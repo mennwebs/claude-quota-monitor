@@ -104,11 +104,12 @@ enum QuotaAPI {
     ///
     /// `plan` is deliberately left nil. This endpoint and claude.ai's
     /// `/api/organizations/{id}` word the tier differently for the same organization
-    /// (`default_claude_max_5x` here against `default_raven` there, on one Team seat),
-    /// and `absorb` is last-writer-wins — so filling it in would make the row's plan
-    /// badge alternate every few minutes depending on which source reported last. The
-    /// extension and `~/.claude.json` both already carry it; the tier this endpoint
-    /// reports is shown in Settings instead, next to the account it identifies.
+    /// (`default_claude_max_5x` here against `default_raven` there, on one Team seat), so
+    /// carrying it would badge a Team card as Max — and show the model-cap row a Team card
+    /// hides — on any row the extension is not reporting. Where it is, the extension's
+    /// "Team" outranks it anyway (`AccountSnapshot.resolvePlan`), so it would add nothing.
+    /// The tier this endpoint reports is shown in Settings instead, next to the account
+    /// it identifies.
     static func identity(fromProfile data: Data) -> CLIIdentity? {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let account = root["account"] as? [String: Any]
