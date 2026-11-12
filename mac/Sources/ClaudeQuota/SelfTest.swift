@@ -406,7 +406,7 @@ enum SelfTest {
         var otherSource = AccountSnapshot(key: "acct:other")
         otherSource.limits = [LimitID.fiveHour: reading(12, t0.addingTimeInterval(-60), .cli)]
         otherSource.absorb(extReport([LimitID.sevenDay: reading(5, t0)], at: t0))
-        check("it never speaks for another source's 5h",
+        check("it leaves another source's still-running 5h alone",
               otherSource.limits[LimitID.fiveHour]?.pct == 12)
 
         var redelivered = AccountSnapshot(key: "acct:redelivered")
@@ -492,6 +492,98 @@ enum SelfTest {
         } else {
             check("the retirement survives a save", false)
         }
+
+        // The Menn card: the status line filed a 5h on an Ultra row, then went quiet for a
+        // week, so its own retirement never came. The browser's "no window" every minute did.
+        func session(_ pct: Double, seen: Date, resets: Date?, _ src: ReadingSource) -> LimitReading {
+            LimitReading(pct: pct, resetsAt: resets, observedAt: seen, source: src, label: nil)
+        }
+        let aWeekAgo = t0.addingTimeInterval(-7 * 86_400)
+        let quietCLI = session(100, seen: aWeekAgo, resets: aWeekAgo.addingTimeInterval(4 * 3600), .cli)
+        var abandoned = AccountSnapshot(key: "acct:abandoned")
+        abandoned.limits = [LimitID.fiveHour: quietCLI, LimitID.sevenDay: reading(90, aWeekAgo, .cli)]
+        abandoned.absorb(extReport([LimitID.sevenDay: reading(92, t0)], at: t0))
+        check("another source's \"no window\" retires a 5h whose window is already over",
+              abandoned.limits[LimitID.fiveHour] == nil)
+        abandoned.absorb(IncomingReport(source: .cli, limits: [LimitID.fiveHour: quietCLI],
+                                        receivedAt: t0.addingTimeInterval(60)))
+        check("and the quiet source re-posting it later does not bring it back",
+              abandoned.limits[LimitID.fiveHour] == nil)
+        let cliReturns = session(3, seen: t0.addingTimeInterval(120),
+                                 resets: t0.addingTimeInterval(120 + 5 * 3600), .cli)
+        abandoned.absorb(IncomingReport(source: .cli, limits: [LimitID.fiveHour: cliReturns],
+                                        receivedAt: t0.addingTimeInterval(120)))
+        check("while a window the quiet source sees afresh is taken",
+              abandoned.limits[LimitID.fiveHour]?.pct == 3)
+
+        var liveElsewhere = AccountSnapshot(key: "acct:live-elsewhere")
+        liveElsewhere.limits = [LimitID.fiveHour: session(40, seen: t0.addingTimeInterval(-4 * 3600),
+                                                          resets: t0.addingTimeInterval(3600), .cli)]
+        liveElsewhere.absorb(extReport([LimitID.sevenDay: reading(5, t0)], at: t0))
+        check("but never one whose window is still running",
+              liveElsewhere.limits[LimitID.fiveHour]?.pct == 40)
+
+        // Over by its reset time, not by when it was seen: the status line re-renders a cached
+        // window after it resets, so a reading seen long after its own reset is the usual case.
+        var resetEarly = AccountSnapshot(key: "acct:reset-early")
+        resetEarly.limits = [LimitID.fiveHour: session(60, seen: t0.addingTimeInterval(-5 * 3600),
+                                                       resets: t0.addingTimeInterval(-4 * 3600), .cli)]
+        resetEarly.absorb(extReport([LimitID.sevenDay: reading(5, t0)], at: t0))
+        check("a window is over by its reset time, not by when it was seen",
+              resetEarly.limits[LimitID.fiveHour] == nil)
+
+        // A Max card fed by its browser, with another account's status line misfiled onto it.
+        // The browser refetches every 15 minutes and re-posts its cached 5h in between.
+        var justReset = AccountSnapshot(key: "acct:just-reset")
+        let cached = session(70, seen: t0.addingTimeInterval(-20 * 60),
+                             resets: t0.addingTimeInterval(-10 * 60), .ext)
+        justReset.limits = [LimitID.fiveHour: cached]
+        justReset.absorb(IncomingReport(source: .cli, limits: [LimitID.sevenDay: reading(30, t0, .cli)],
+                                        receivedAt: t0))
+        justReset.absorb(extReport([LimitID.fiveHour: cached, LimitID.sevenDay: reading(40, cached.observedAt)],
+                                   at: t0.addingTimeInterval(60)))
+        check("a window that has only just reset still reads \"รีเซ็ตแล้ว\" until its source refetches",
+              justReset.limits[LimitID.fiveHour]?.expired(at: t0) == true)
+
+        var noReset = AccountSnapshot(key: "acct:no-reset")
+        noReset.limits = [LimitID.fiveHour: session(0, seen: t0.addingTimeInterval(-9 * 3600),
+                                                    resets: nil, .cli)]
+        noReset.absorb(extReport([LimitID.sevenDay: reading(5, t0)], at: t0))
+        check("a 5h with no reset time counts as over a full window after it was seen",
+              noReset.limits[LimitID.fiveHour] == nil)
+
+        var spentAlone = AccountSnapshot(key: "acct:spent-alone")
+        spentAlone.limits = [LimitID.fiveHour: quietCLI]
+        spentAlone.absorb(IncomingReport(source: .cli,
+                                         limits: [LimitID.fiveHour: quietCLI,
+                                                  LimitID.sevenDay: reading(20, aWeekAgo, .cli)],
+                                         receivedAt: t0))
+        check("with no source saying otherwise, a reset window stays to say \"รีเซ็ตแล้ว\"",
+              spentAlone.limits[LimitID.fiveHour]?.expired(at: t0) == true)
+
+        var heldByDuplicate = AccountSnapshot(key: "org:holds-cli-5h")
+        heldByDuplicate.limits = [LimitID.fiveHour: quietCLI]
+        var foldTarget = retiredRow
+        foldTarget.foldLimits(from: heldByDuplicate)
+        check("folding in a row that holds it does not revive it either",
+              foldTarget.limits[LimitID.fiveHour] == nil)
+        var foldKeeper = heldByDuplicate
+        foldKeeper.foldLimits(from: retiredRow)
+        check("nor does keeping the quiet source's row and folding the retired one into it",
+              foldKeeper.limits[LimitID.fiveHour] == nil)
+
+        // The fold has to judge the incoming reading by the same rule, or a dead 5h that is
+        // merely newer-observed displaces a live one and is then dropped, leaving neither.
+        var liveTarget = AccountSnapshot(key: "acct:live-target")
+        liveTarget.limits = [LimitID.fiveHour: session(12, seen: t0, resets: t0.addingTimeInterval(7200), .ext)]
+        liveTarget.absorb(IncomingReport(source: .api, limits: [LimitID.sevenDay: reading(5, t0, .api)],
+                                         receivedAt: t0))
+        var staleCache = AccountSnapshot(key: "org:stale-cache")
+        staleCache.limits = [LimitID.fiveHour: session(100, seen: t0.addingTimeInterval(30),
+                                                       resets: t0.addingTimeInterval(-4 * 3600), .cli)]
+        liveTarget.foldLimits(from: staleCache)
+        check("a newer-seen 5h whose window is long over does not displace a live one in a fold",
+              liveTarget.limits[LimitID.fiveHour]?.pct == 12)
 
         print("\n▸ A Team seat's model caps — hidden unless asked for")
         let t1 = t0.addingTimeInterval(60)

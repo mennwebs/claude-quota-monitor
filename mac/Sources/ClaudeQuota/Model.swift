@@ -482,7 +482,7 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
 
         for (rawKind, reading) in r.limits {
             if let existing = limits[rawKind], existing.observedAt > reading.observedAt { continue }
-            if rawKind == LimitID.fiveHour, predatesRetirement(reading) { continue }
+            if rawKind == LimitID.fiveHour, isRetired(reading) { continue }
             limits[rawKind] = reading
         }
         retireModelCaps(missingFrom: r)
@@ -529,9 +529,9 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
     ///
     /// Unlike the model list there is no hiccup to wait out: every source states the two
     /// ceilings on every report, so the reading goes at once rather than after
-    /// `retiredModelCapAge`. Only the source's *own* reading, for the same reason as the
-    /// model caps; and only one the report has seen past, since two browser profiles on one
-    /// account post on their own minutes and an older re-delivery must not erase a newer one.
+    /// `retiredModelCapAge`. Only one the report has seen past, since two browser profiles on
+    /// one account post on their own minutes and an older re-delivery must not erase a newer
+    /// one. See `isRetired` for when another source's reading goes too.
     ///
     /// The absence is remembered in `sessionRetiredAt`, so it holds against older data the
     /// way a newer reading would: the other profile's stale re-post is refused, not revived.
@@ -543,19 +543,41 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         let source = r.source.rawValue
         retired[source] = max(retired[source] ?? .distantPast, seen)
         sessionRetiredAt = retired
-        dropSessionPredatingRetirement()
+        dropRetiredSession()
     }
 
-    /// Whether a 5h reading was observed before its own source last said there is no
-    /// window. A later reading is the window coming back — a spent week resetting — and
-    /// is taken as usual.
-    private func predatesRetirement(_ reading: LimitReading) -> Bool {
-        guard let at = sessionRetiredAt?[reading.source.rawValue] else { return false }
-        return reading.observedAt < at
+    /// Whether a later "no window" answers this 5h reading.
+    ///
+    /// Its own source's word answers it whenever the reading predates it. A later reading is
+    /// the window coming back — a spent week resetting — and is taken as usual.
+    ///
+    /// Another source's word answers it only once the reading's own window has been over for
+    /// `sourceBadgeAge`. Sources poll on their own clocks, so a live window one source still
+    /// sees must not be erased by another's timing — but a window long since reset holds no
+    /// number anyone is still spending against, and a source that goes quiet never retires its
+    /// own. The status line is the one that does: it reports only while a terminal is drawing
+    /// it, and a 5h it filed on an Ultra card stayed there for a week as "รีเซ็ตแล้ว", beside a
+    /// browser saying every minute that the account has no such window.
+    ///
+    /// The margin is for a source that is still feeding the row and simply has not refetched
+    /// since the reset — the extension fetches every 15 minutes and re-posts the same reading
+    /// in between. Without it, a status line misfiled onto a card that does have a window
+    /// would blank the row at every reset instead of letting it read "รีเซ็ตแล้ว". The badge's
+    /// horizon is the app's existing answer to "is this source still feeding the row".
+    ///
+    /// A reading with no reset time is over once a full window has passed since it was seen.
+    private func isRetired(_ reading: LimitReading) -> Bool {
+        guard let retired = sessionRetiredAt else { return false }
+        let own = reading.source.rawValue
+        if let at = retired[own], reading.observedAt < at { return true }
+        let over = reading.resetsAt
+            ?? reading.observedAt.addingTimeInterval(LimitID.windowLength(LimitID.fiveHour) ?? 0)
+        let settled = over.addingTimeInterval(Self.sourceBadgeAge)
+        return retired.contains { $0.key != own && $0.value >= settled }
     }
 
-    private mutating func dropSessionPredatingRetirement() {
-        if let held = limits[LimitID.fiveHour], predatesRetirement(held) {
+    private mutating func dropRetiredSession() {
+        if let held = limits[LimitID.fiveHour], isRetired(held) {
             limits[LimitID.fiveHour] = nil
         }
     }
@@ -572,10 +594,10 @@ struct AccountSnapshot: Codable, Identifiable, Equatable, Sendable {
         }
         for (id, reading) in victim.limits
         where (limits[id]?.observedAt ?? .distantPast) < reading.observedAt {
-            if id == LimitID.fiveHour, predatesRetirement(reading) { continue }
+            if id == LimitID.fiveHour, isRetired(reading) { continue }
             limits[id] = reading
         }
-        dropSessionPredatingRetirement()
+        dropRetiredSession()
     }
 }
 
