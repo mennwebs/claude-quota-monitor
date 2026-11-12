@@ -49,7 +49,10 @@ Headers: `Content-Type: application/json`, `X-CQM-Token: <token from the app>`
   kind (`extension`, `cli`, `api`), not the browser profile, and the absence is remembered: a
   `five_hour` from that source observed *before* it is refused, so a second profile re-posting
   an older cache cannot bring the row back. A newer one is the window returning, and is taken.
-  Another source's reading is left alone.
+  Another source's reading is left alone until its window has been over for three hours —
+  counted from `resetsAt`, or with none from five hours after it was observed — and then goes
+  too, because a source that stops reporting (the status line, whenever no terminal is drawing
+  it) never retires its own. The margin lets a source still feeding the row refetch first.
 - The old `seven_day_opus` / `seven_day_sonnet` / `seven_day_design` keys are still accepted and
   translated, so a profile running an older extension build keeps reporting.
 - A report with no recognized limit is rejected, because an empty report would refresh a row's

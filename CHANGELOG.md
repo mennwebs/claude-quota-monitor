@@ -125,6 +125,12 @@ All notable changes to Claude Quota Monitor are documented here.
   An account that does have a window loses it the same way while its weekly cap is spent, so
   its 5h row now steps aside until the week resets; the 7d row at 100% already says why.
 
+  Another source's 5h goes too once its window has been reset for three hours. The status line
+  only reports while a terminal is drawing it, so a 5h it filed on an Ultra card sat there for a
+  week reading "รีเซ็ตแล้ว" while the browser said every minute that the account has no such
+  window. A window still running is left alone, and the margin lets a source that is still
+  feeding the row refetch after a reset before anyone else's word counts.
+
   A browser profile still running an older build keeps sending the 0% until the extension is
   reloaded there.
 - **Plan badges use the names people know.** The tier ids lag the product: Max 20x was renamed
